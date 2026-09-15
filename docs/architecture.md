@@ -69,8 +69,16 @@ because there is no code path where the caller chooses whose data to touch.
 
 ## Data model
 
-One DynamoDB table, on-demand billing, encrypted at rest (the default SSE is fine;
-a customer-managed KMS key is available if you want the audit trail).
+One DynamoDB table, on-demand billing, encrypted at rest.
+
+That encryption is unconditional — DynamoDB encrypts every table, and the only
+choice is which key. This uses the AWS-owned key, which costs nothing and has no
+setup. The AWS-managed `aws/dynamodb` key is the tempting upgrade, since it adds
+CloudTrail visibility of key use, but AWS creates that key lazily on first use in a
+region: asking a brand new account for it fails with a KMS `NotFoundException`
+before anything exists that would have created it. A customer-managed key is the
+option worth taking if you ever want the audit trail, and it has to be created
+alongside the table rather than assumed to exist.
 
 | PK | SK | Item |
 |---|---|---|

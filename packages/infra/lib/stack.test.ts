@@ -123,13 +123,24 @@ describe('the data at rest', () => {
     });
   });
 
-  it('encrypts both stores', () => {
+  it('encrypts the photo bucket', () => {
     template.hasResourceProperties('AWS::S3::Bucket', {
       BucketEncryption: Match.anyValue(),
     });
-    template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
-      SSESpecification: { SSEEnabled: true },
-    });
+  });
+
+  it('leaves the receipt table on DynamoDB-managed encryption', () => {
+    /*
+     * DynamoDB encrypts every table at rest unconditionally, so there is no
+     * "is it encrypted" property to assert - SSESpecification only selects a KMS
+     * key, and SSEEnabled: false means the AWS-owned key rather than no encryption.
+     * What is worth pinning is that no KMS key is named: asking for the AWS-managed
+     * aws/dynamodb key fails on a new account, because AWS creates that key lazily
+     * on first use and it does not exist yet at stack-creation time.
+     */
+    const tables = Object.values(template.findResources('AWS::DynamoDB::GlobalTable'));
+    expect(tables).toHaveLength(1);
+    expect(tables[0]!.Properties?.SSESpecification?.KMSMasterKeyId).toBeUndefined();
   });
 
   it('can recover the table to a point in time', () => {

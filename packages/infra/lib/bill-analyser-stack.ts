@@ -122,7 +122,15 @@ export class BillAnalyserStack extends Stack {
       partitionKey: { name: 'pk', type: AttributeType.STRING },
       sortKey: { name: 'sk', type: AttributeType.STRING },
       billing: Billing.onDemand(),
-      encryption: TableEncryptionV2.awsManagedKey(),
+      /*
+       * DynamoDB encrypts every table at rest unconditionally; this names which key
+       * does it. The AWS-managed key (aws/dynamodb) is the tempting upgrade - it adds
+       * CloudTrail visibility of key use - but AWS creates that key lazily on first
+       * use in a region, so asking a brand new account for it fails with a KMS
+       * NotFoundException before anything exists that would have created it. The
+       * AWS-owned key has no such bootstrap problem and no monthly key charge.
+       */
+      encryption: TableEncryptionV2.dynamoOwnedKey(),
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       // Years of receipts should not evaporate because a stack was torn down.
       removalPolicy: RemovalPolicy.RETAIN,
