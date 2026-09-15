@@ -2,6 +2,7 @@ import {
   CfnOutput,
   Duration,
   RemovalPolicy,
+  SecretValue,
   Stack,
   type StackProps,
 } from 'aws-cdk-lib';
@@ -32,7 +33,7 @@ import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
-import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -45,7 +46,8 @@ export interface BillAnalyserStackProps extends StackProps {
   siteOrigin: string;
   /** Path the app lives under on that origin, e.g. "/bill-analyser/". */
   sitePath: string;
-  bedrockModelId: string;
+  /** Model that reads the receipts, in Anthropic's own naming, e.g. claude-opus-5. */
+  anthropicModel: string;
   /** Days a receipt photo is kept before S3 deletes it. */
   photoRetentionDays: number;
 }
@@ -56,7 +58,7 @@ export class BillAnalyserStack extends Stack {
 
     const appUrl = `${props.siteOrigin}${props.sitePath}`;
 
-    assertMessagesApiModelId(props.bedrockModelId);
+    assertAnthropicModelId(props.anthropicModel);
 
     /* ---------------------------------------------------------------------
      * Who you are
@@ -165,6 +167,23 @@ export class BillAnalyserStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
+    /*
+     * The Anthropic API key.
+     *
+     * Created here so its name and permissions are version-controlled, but its value
+     * never is: CloudFormation sets a placeholder at creation and the real key is
+     * pasted in through the console. It therefore never passes through this
+     * repository, GitHub Actions, or the CloudFormation template - the three places
+     * a secret in a project like this usually leaks from.
+     */
+    const apiKey = new Secret(this, 'AnthropicApiKey', {
+      secretName: 'bill-analyser/anthropic-api-key',
+      description: 'Anthropic API key used to read receipts. Set this by hand in the console.',
+      secretStringValue: SecretValue.unsafePlainText('replace-me-with-your-anthropic-api-key'),
+      // Losing the key to a stack operation would mean going and minting another.
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
     /* ---------------------------------------------------------------------
      * The API
      * ------------------------------------------------------------------ */
@@ -200,7 +219,8 @@ export class BillAnalyserStack extends Stack {
     const commonEnvironment = {
       TABLE_NAME: table.tableName,
       PHOTO_BUCKET: photos.bucketName,
-      BEDROCK_MODEL_ID: props.bedrockModelId,
+      ANTHROPIC_MODEL: props.anthropicModel,
+      ANTHROPIC_API_KEY_SECRET: 'bill-analyser/anthropic-api-key',
       // Trims cold starts by skipping the SDK's slow path for reusing connections.
       AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1',
     };
@@ -288,49 +308,8 @@ export class BillAnalyserStack extends Stack {
      * is used - so both forms are granted, still scoped to Anthropic models rather
      * than opened up to "*".
      */
-    /*
-     * The Messages-API endpoint on Bedrock ("Mantle") authorises under its own
-     * service namespace: bedrock-mantle:CreateInference against a project, not
-     * bedrock:InvokeModel against a model ARN. Granting only the latter produces a
-     * 403 naming an action that does not appear anywhere in the policy, which reads
-     * like a typo rather than a wrong service.
-     */
-    parseWorkerFn.addToRolePolicy(
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['bedrock-mantle:CreateInference'],
-        /*
-         * Resource "*", deliberately, after the scoped form did not work.
-         *
-         * Granting this against `arn:aws:bedrock-mantle:<region>:<account>:project/*`
-         * - which is the resource the 403 itself names, and which that wildcard
-         * matches - was still refused with "no identity-based policy allows the
-         * bedrock-mantle:CreateInference action". That is the signature of an action
-         * that does not support resource-level permissions: the statement simply
-         * never matches, whatever ARN is written. Newer services often launch that
-         * way while still echoing the resource in the denial message.
-         *
-         * The breadth is bounded by the action rather than the resource: this grants
-         * exactly one operation, on a service whose only use here is reading
-         * receipts. Worth re-scoping if AWS documents resource-level support later.
-         */
-        resources: ['*'],
-      }),
-    );
-
-    // The legacy InvokeModel path, kept so switching to the non-Mantle Bedrock
-    // client stays a one-line change rather than an IAM archaeology exercise.
-    parseWorkerFn.addToRolePolicy(
-      new PolicyStatement({
-        effect: Effect.ALLOW,
-        actions: ['bedrock:InvokeModel'],
-        resources: [
-          'arn:aws:bedrock:*::foundation-model/anthropic.*',
-          `arn:aws:bedrock:*:${this.account}:inference-profile/*.anthropic.*`,
-          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${props.bedrockModelId}`,
-        ],
-      }),
-    );
+    // The only thing the worker needs beyond the table and the photo bucket.
+    apiKey.grantRead(parseWorkerFn);
 
     const route = (path: string, methods: HttpMethod[], fn: NodejsFunction, name: string) =>
       api.addRoutes({
@@ -371,6 +350,10 @@ export class BillAnalyserStack extends Stack {
       value: `https://${userPoolDomain.domainName}.auth.${this.region}.amazoncognito.com`,
       description: 'VITE_COGNITO_DOMAIN',
     });
+    new CfnOutput(this, 'SetApiKeyConsoleLink', {
+      value: `https://${this.region}.console.aws.amazon.com/secretsmanager/secret?name=bill-analyser%2Fanthropic-api-key&region=${this.region}`,
+      description: 'Paste your Anthropic API key here - scanning fails until you do',
+    });
     new CfnOutput(this, 'CreateUserConsoleLink', {
       value: `https://${this.region}.console.aws.amazon.com/cognito/v2/idp/user-pools/${userPool.userPoolId}/users`,
       description: 'Where to create your login',
@@ -387,44 +370,32 @@ export class BillAnalyserStack extends Stack {
 }
 
 /**
- * Reject model ids that have been observed not to work, and nothing else.
+ * Reject a Bedrock-style model id.
  *
- * Bedrock names models two ways. `bedrock-runtime` - what the console's Playground
- * and model catalogue show - uses cross-region inference profile ids like
- * `eu.anthropic.claude-opus-4-5-...` and full ARNs. The Messages API endpoint this
- * app calls does not recognise either: both were tried against a live account and
- * returned "The model ... does not exist".
- *
- * What it does want is the `anthropic.`-prefixed id from the model card in the
- * Bedrock user guide, which for some models carries a date and a `-v1:0` suffix and
- * for others does not. An earlier version of this check rejected the suffixed form
- * on the assumption that it belonged to the runtime scheme. That assumption was
- * wrong, and it blocked the id AWS documents - so this now refuses only the two
- * shapes actually seen to fail, and lets anything else reach the endpoint, which is
- * the only authority on what it accepts.
+ * The Anthropic API uses plain names - `claude-opus-5`, `claude-opus-4-5`. Bedrock's
+ * variants carry an `anthropic.` prefix, sometimes a region prefix and a `-v1:0`
+ * suffix, and this project spent a long time on Bedrock, so those ids are the ones
+ * lying around to be pasted in by mistake. None of them resolve here.
  */
-export function assertMessagesApiModelId(modelId: string): void {
-  if (modelId.startsWith('arn:')) {
+export function assertAnthropicModelId(modelId: string): void {
+  const bedrockStyle =
+    modelId.startsWith('arn:') ||
+    modelId.startsWith('anthropic.') ||
+    /^(eu|us|apac|global)\./.test(modelId) ||
+    /-v\d+:\d+$/.test(modelId);
+
+  if (bedrockStyle) {
     throw new Error(
-      `BEDROCK_MODEL_ID "${modelId}" is an ARN. The Messages API endpoint this app ` +
-        'uses takes a model id, not an ARN - for example ' +
-        '"anthropic.claude-opus-4-5-20251101-v1:0". See docs/setup.md step 3c.',
+      `ANTHROPIC_MODEL "${modelId}" looks like a Bedrock model id. The Anthropic API ` +
+        'uses plain names with no prefix, no region and no version suffix - for ' +
+        'example "claude-opus-5". See docs/setup.md step 3.',
     );
   }
 
-  if (/^(eu|us|apac|global)\./.test(modelId)) {
+  if (!modelId.startsWith('claude-')) {
     throw new Error(
-      `BEDROCK_MODEL_ID "${modelId}" starts with a region prefix, which makes it a ` +
-        'cross-region inference profile id. Those belong to bedrock-runtime and are ' +
-        'not recognised here. Use the "anthropic."-prefixed id from the model card ' +
-        'in the Bedrock user guide. See docs/setup.md step 3c.',
-    );
-  }
-
-  if (!modelId.startsWith('anthropic.')) {
-    throw new Error(
-      `BEDROCK_MODEL_ID "${modelId}" should start with "anthropic." - for example ` +
-        '"anthropic.claude-opus-4-5-20251101-v1:0". See docs/setup.md step 3c.',
+      `ANTHROPIC_MODEL "${modelId}" should be a Claude model name such as ` +
+        '"claude-opus-5". See docs/setup.md step 3.',
     );
   }
 }

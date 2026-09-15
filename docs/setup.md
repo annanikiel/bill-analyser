@@ -75,77 +75,35 @@ and hands out a credential that expires in minutes.
 
 ---
 
-## 3. Check Claude works in Bedrock, and note its id
+## 3. Get an Anthropic API key
 
-AWS used to require you to tick a box on a "Model access" page. **That page has been
-retired** — serverless models now enable themselves the first time they are invoked,
-so there is nothing to switch on.
+The app reads receipts by calling the Anthropic API directly.
 
-Two things still need doing, and skipping them means the deploy succeeds and then
-scanning a receipt fails, which is a much more annoying way to find out.
+It originally went through Amazon Bedrock, which would have kept everything inside
+one AWS account and one bill. That did not work out: Bedrock withheld the newest
+Claude models from this account entirely, and the ones it did offer returned *"the
+model does not exist"* for every id AWS documents. Calling the API directly has none
+of that ambiguity. The trade is that model usage is billed by Anthropic rather than
+appearing on your AWS bill, and that there is now one secret to look after.
 
-### 3a. Invoke Claude once, by hand
+1. Go to the [Anthropic Console](https://console.anthropic.com/) and sign up or sign in.
+2. **API keys** → **Create key**. Name it `bill-analyser`.
+3. Copy it now — the console will not show it again.
+4. Add some credit under **Billing**. A few pounds lasts a long time at a few pence
+   per receipt.
 
-The retirement notice carries a caveat: *for Anthropic models, first-time users may
-need to submit use case details before they can access the model.* That form is
-easiest to deal with now, deliberately, rather than from inside a failing Lambda.
+**Do not put the key in GitHub, and do not paste it into the workflow.** It goes into
+AWS Secrets Manager in step 5, after the infrastructure that holds it exists. Nothing
+in this repository ever contains it.
 
-1. Check the region selector (top right) says **Europe (London) eu-west-2**.
-2. **Amazon Bedrock** → **Playground** (under *Test* in the left sidebar).
-3. Pick a **Claude** model, type anything, and send it.
-4. If a use case form appears, fill it in. It is a short form about what you are
-   building; approval is normally immediate.
+### Which model
 
-When you get a reply back, Bedrock is working in your account and region. That is the
-whole point of this step.
+Leave the deploy workflow's **model** box at `claude-opus-5`.
 
-### 3b. Find a model your account can actually use
-
-**Bedrock gates its newest flagship models per AWS account.** A personal account will
-commonly be refused the current generation while the previous one works fine. The
-refusal is unmistakable:
-
-> `AccessDeniedException: anthropic.claude-opus-5 is not available for this account.`
-> `For additional access options, contact AWS Sales…`
-
-Note the wording — *not available for this account*, rather than *not authorized to
-perform*. That is an entitlement decision above IAM, and it affects other vendors'
-flagship models on the same account too, so it is not about Anthropic specifically
-and not something the use case form in 3a changes.
-
-So: in the **Playground**, work down from newest until one answers. If Opus 5 is
-refused, try **Opus 4.5**; if the newest Sonnet is refused, try the one before it.
-The app works well on either.
-
-### 3c. The model id to use
-
-Take it from the **model card in the Bedrock user guide**, not from the Playground or
-the model catalogue. The console shows a different naming scheme from the one this
-app needs, which is an easy and expensive thing to get wrong.
-
-1. Open the [Bedrock supported models list](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
-   and find the model that answered for you in step 3a.
-2. Use the **Model ID** from its model card, exactly. For Claude Opus 4.5 that is:
-
-   ```
-   anthropic.claude-opus-4-5-20251101-v1:0
-   ```
-
-That is the workflow's default, so usually you change nothing.
-
-**What not to use.** These are the forms the console offers, and none of them
-resolve — each returns *"The model ... does not exist"*:
-
-| Don't use | Why |
-|---|---|
-| `arn:aws:bedrock:...:inference-profile/...` | An ARN, from "View API request" |
-| `eu.anthropic.claude-opus-4-5-20251101-v1:0` | Region-prefixed cross-region inference profile |
-| `us.anthropic...`, `apac.anthropic...` | Same, other regions |
-
-The deploy refuses those two shapes with an explanation rather than letting them
-fail later at the first scan. It does **not** try to second-guess anything else —
-the endpoint is the only real authority on what it accepts, so any other
-`anthropic.`-prefixed id is passed straight through.
+If you paste a Bedrock-style id — anything starting `anthropic.`, carrying a region
+prefix, or ending `-v1:0` — the deploy refuses it with an explanation. The Anthropic
+API uses plain names: `claude-opus-5`, `claude-opus-4-5`, `claude-sonnet-5`,
+`claude-haiku-4-5`.
 
 ## 4. Create the infrastructure
 
@@ -165,7 +123,24 @@ being wrong (step 2c) and the trust policy naming a different branch (step 2b).
 
 ---
 
-## 5. Create your login
+## 5. Set the API key, and create your login
+
+### 5a. Paste in the API key
+
+The stack created an empty secret for it. Until you fill it in, scanning fails with a
+message saying exactly that.
+
+1. Use the **SetApiKeyConsoleLink** from the run summary in step 4, or: AWS console →
+   **Secrets Manager** → **bill-analyser/anthropic-api-key**.
+2. **Retrieve secret value** → **Edit**.
+3. Replace `replace-me-with-your-anthropic-api-key` with the key from step 3.
+   Use the **Plaintext** tab and make sure the key is the entire contents — no quotes,
+   no braces, no trailing spaces.
+4. **Save**.
+
+The key is only ever read by the worker Lambda, at the moment it reads a receipt.
+
+### 5b. Create your login
 
 Nobody can sign up for this app — that is deliberate, and it is why a stranger
 finding your public repository cannot create an account. So you have to create your

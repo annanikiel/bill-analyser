@@ -1,5 +1,6 @@
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
+import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import {
   DEFAULT_CATEGORIES,
@@ -24,16 +25,19 @@ import { listCategories, listRules, putCategories, putReceipt } from './store.js
  * it, and places it in the user's own categories does the whole job at once.
  *
  * This runs in the worker, not behind the API: see parse.ts for why.
+ *
+ * It calls the Anthropic API directly rather than going through Bedrock. Bedrock was
+ * the original design - it keeps everything inside one AWS account and one bill - but
+ * its Messages endpoint would not serve this account any Claude model: the newest
+ * were withheld from the account outright, and the ones that were available returned
+ * "does not exist" for every documented id. The API key route has no such ambiguity.
+ * The trade is that model usage is billed by Anthropic rather than appearing on the
+ * AWS bill, and that there is now a secret to look after.
  */
 
 const BUCKET = process.env.PHOTO_BUCKET!;
-/*
- * Which model reads the receipts. Set from the deploy workflow, because which
- * Claude models an AWS account may invoke varies: Bedrock gates its newest flagship
- * models per account, so a given account often has the previous generation and not
- * the current one.
- */
-const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-opus-4-5';
+/* Which model reads the receipts. Overridable from the deploy workflow. */
+const MODEL_ID = process.env.ANTHROPIC_MODEL ?? 'claude-opus-5';
 
 /*
  * A receipt's worth of JSON, with room for a very large shop. Deliberately under the
@@ -42,7 +46,34 @@ const MODEL_ID = process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-opus-4-5';
 const MAX_TOKENS = 12_000;
 
 const s3 = new S3Client({});
-const anthropic = new AnthropicBedrockMantle({ awsRegion: process.env.AWS_REGION! });
+const secrets = new SecretsManagerClient({});
+
+/*
+ * The API key lives in Secrets Manager and is read at runtime, never baked into the
+ * function or the CloudFormation template. Cached across invocations because Lambda
+ * reuses the container, so a warm worker does not re-fetch it per receipt.
+ */
+const SECRET_ID = process.env.ANTHROPIC_API_KEY_SECRET!;
+let clientPromise: Promise<Anthropic> | null = null;
+
+function getClient(): Promise<Anthropic> {
+  clientPromise ??= (async () => {
+    const result = await secrets.send(new GetSecretValueCommand({ SecretId: SECRET_ID }));
+    const apiKey = result.SecretString?.trim();
+
+    if (!apiKey || apiKey.startsWith('replace-me')) {
+      throw new HttpError(
+        503,
+        'No Anthropic API key has been set yet. Put your key into the ' +
+          'bill-analyser/anthropic-api-key secret in AWS Secrets Manager - see docs/setup.md step 3.',
+      );
+    }
+
+    return new Anthropic({ apiKey });
+  })();
+
+  return clientPromise;
+}
 
 const MEDIA_TYPES: Record<string, 'image/jpeg' | 'image/png' | 'image/webp'> = {
   jpg: 'image/jpeg',
@@ -245,9 +276,15 @@ async function readReceipt(
       });
     }
 
+    const anthropic = await getClient();
     const response = await anthropic.messages.create({
       model: MODEL_ID,
       max_tokens: MAX_TOKENS,
+      // Reading a receipt is perception and classification, not a reasoning problem.
+      // Thinking stays on - it is the default on this model, and disabling it risks
+      // stray tags in the output - but at low effort, which keeps cost and the wait
+      // down. Raise it if long or crumpled receipts start coming back wrong.
+      output_config: { effort: 'low' },
       system: buildPrompt(categories),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- content blocks vary by model version
       messages: messages as any,
