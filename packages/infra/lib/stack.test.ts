@@ -177,11 +177,16 @@ describe('what the functions are allowed to do', () => {
     );
 
     const mantle = statements.filter((statement: { Action?: unknown }) =>
-      JSON.stringify(statement.Action ?? '').includes('bedrock-mantle:CreateInference'),
+      JSON.stringify(statement.Action ?? '').includes('bedrock-mantle:'),
     );
     expect(mantle).toHaveLength(1);
-    expect(JSON.stringify(mantle[0].Resource)).toContain('bedrock-mantle');
-    expect(mantle[0].Resource).not.toBe('*');
+    /*
+     * This one is resource "*" on purpose - the action appears not to support
+     * resource-level permissions (see the stack). So what is pinned instead is that
+     * the breadth stays in the resource and never spreads to the action: exactly one
+     * named operation, never a bedrock-mantle:* wildcard.
+     */
+    expect(mantle[0].Action).toBe('bedrock-mantle:CreateInference');
   });
 
   it('keeps every model permission on the worker, not the API-facing function', () => {
