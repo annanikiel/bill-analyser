@@ -277,7 +277,7 @@ async function readReceipt(
     }
 
     const anthropic = await getClient();
-    const response = await anthropic.messages.create({
+    const response = await callModel(anthropic, {
       model: MODEL_ID,
       max_tokens: MAX_TOKENS,
       // Reading a receipt is perception and classification, not a reasoning problem.
@@ -339,4 +339,28 @@ function stripFence(text: string): string {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   return start !== -1 && end > start ? text.slice(start, end + 1) : text;
+}
+
+/**
+ * Call the model, and make any failure say what was tried.
+ *
+ * An SDK error on its own reads the same whichever model and whichever provider
+ * produced it - "404 not_found_error" is equally consistent with a mistyped model
+ * name, a model your account cannot use, and a stale deployment still calling
+ * something else entirely. Naming both in the message removes a whole round of
+ * guessing, because this text is what reaches the user on the scan screen.
+ */
+async function callModel(
+  anthropic: Anthropic,
+  request: Parameters<Anthropic['messages']['create']>[0],
+): Promise<Anthropic.Message> {
+  try {
+    return (await anthropic.messages.create(request)) as Anthropic.Message;
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new HttpError(
+      502,
+      `The Anthropic API rejected the request for model "${MODEL_ID}": ${detail}`,
+    );
+  }
 }

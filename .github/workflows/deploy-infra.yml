@@ -8,12 +8,6 @@ name: Deploy AWS infrastructure
 on:
   workflow_dispatch:
     inputs:
-      region:
-        description: AWS region to deploy into
-        required: true
-        default: eu-west-2
-        type: choice
-        options: [eu-west-2, eu-west-1, us-east-1]
       model:
         description: 'Claude model that reads the receipts (Anthropic naming, e.g. claude-opus-5)'
         required: true
@@ -38,6 +32,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the region is set
+        # The region is deliberately NOT an input here. It used to be, defaulting to
+        # eu-west-2, while the web deploy read the AWS_REGION variable - so choosing
+        # a different region in the dropdown built a second, complete stack in
+        # another region and left the app pointed at the first one. Both deploys
+        # succeeded and nothing said they disagreed. One source of truth instead.
+        run: |
+          if [ -z "${AWS_REGION}" ]; then
+            echo "::error::Set the AWS_REGION repository variable (Settings - Secrets and variables - Actions - Variables). It is where your data and login live, and both deploy workflows read it, so they cannot drift apart."
+            exit 1
+          fi
+          echo "Deploying to ${AWS_REGION}"
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
 
       - name: Check this run is on the current main
         # Re-running a previous run replays that run's original commit, so anything
@@ -69,7 +78,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ inputs.region }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Authenticate to AWS (access keys)
         if: vars.AWS_ROLE_ARN == ''
@@ -77,7 +86,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.region }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Work out the site URL
         id: site
@@ -97,14 +106,14 @@ jobs:
         working-directory: packages/infra
         run: npx cdk bootstrap --require-approval never
         env:
-          AWS_REGION: ${{ inputs.region }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
           SITE_ORIGIN: https://placeholder.invalid
 
       - name: Deploy
         working-directory: packages/infra
         run: npx cdk deploy --require-approval never --outputs-file outputs.json
         env:
-          AWS_REGION: ${{ inputs.region }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
           SITE_ORIGIN: ${{ steps.site.outputs.origin }}
           SITE_PATH: /${{ github.event.repository.name }}/
           ANTHROPIC_MODEL: ${{ inputs.model }}
@@ -115,7 +124,7 @@ jobs:
           {
             echo "## Infrastructure deployed"
             echo
-            echo "Region: \`${{ inputs.region }}\`"
+            echo "Region: \`${{ vars.AWS_REGION }}\`"
             echo "Model: \`${{ inputs.model }}\`"
             echo
             echo "### Next"

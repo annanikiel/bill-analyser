@@ -71,7 +71,14 @@ and hands out a credential that expires in minutes.
 1. Repository → **Settings** → **Secrets and variables** → **Actions**.
 2. The **Variables** tab (*not* Secrets — this is an identifier, not a password).
 3. **New repository variable**: name `AWS_ROLE_ARN`, value = the ARN you copied.
-4. Add a second variable: name `AWS_REGION`, value `eu-west-2`.
+4. Add a second variable: name `AWS_REGION`, value `eu-west-1` (Ireland) or
+   `eu-west-2` (London) — whichever you want your data in.
+
+> **This one variable decides the region for everything**, and both deploy workflows
+> read it. That is deliberate: when the region was chosen per-deploy instead, picking
+> a different one quietly built a second complete stack somewhere else and left the
+> app talking to the first. Both deploys reported success. Change it only if you mean
+> to move, and expect to migrate your data and login if you do.
 
 ---
 
@@ -109,9 +116,9 @@ API uses plain names: `claude-opus-5`, `claude-opus-4-5`, `claude-sonnet-5`,
 
 1. Repository → **Actions** tab.
 2. **Deploy AWS infrastructure** in the left sidebar → **Run workflow**.
-3. Check the region matches what you chose. Leave the **model** box at its default
-   unless step 3a showed that model is not available to you, in which case use that
-   model's id from its model card. Leave the retention as it is. → **Run workflow**.
+3. Leave the **model** box at its default `claude-opus-5` and the retention as it is.
+   → **Run workflow**. The region comes from the `AWS_REGION` variable, not from this
+   form, so there is nothing to keep in sync by hand.
 
 It takes roughly 5–10 minutes, mostly creating the Cognito pool.
 
@@ -200,6 +207,14 @@ The URL you are visiting does not exactly match what the stack registered. The r
 summary from step 4 lists `ExpectedAppUrl` — compare it to your address bar, watching
 for a missing trailing slash or a capital letter in your username. Re-run step 4 if
 they differ.
+
+**Everything deploys fine but the app behaves as though it did not.**
+Check the region. The run summary prints it; compare it against the `AWS_REGION`
+variable and against where your data actually is (CloudFormation → your stack). A
+stack in the wrong region is a complete, healthy, entirely unused copy of the app,
+and every deploy of it succeeds. If you find a stray one, delete its CloudFormation
+stack — and note the table, bucket, user pool and secret are marked *Retain*, so
+they survive and need deleting by hand if you want them gone.
 
 **A fix was deployed but nothing changed.**
 Check you started a *fresh* run rather than re-running an old one. In the Actions
