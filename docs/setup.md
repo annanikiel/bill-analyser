@@ -99,32 +99,39 @@ easiest to deal with now, deliberately, rather than from inside a failing Lambda
 When you get a reply back, Bedrock is working in your account and region. That is the
 whole point of this step.
 
-### 3b. Copy the exact model id
+### 3b. Find a model your account can actually use
 
-1. **Amazon Bedrock** → **Model catalog** (left sidebar).
-2. Find the Claude model you just used and open it.
-3. Copy its **model ID**, exactly as shown.
+**Bedrock gates its newest flagship models per AWS account.** A personal account will
+commonly be refused the current generation while the previous one works fine. The
+refusal is unmistakable:
 
-It will look like either `anthropic.claude-opus-5` or `eu.anthropic.claude-opus-5`.
-**The prefix matters.** Some models are served only through a regional *inference
-profile*, which is what the `eu.` prefix means, and passing the wrong form gives a
-validation error when a receipt is scanned. Which form applies varies by region and
-changes over time, which is why this is worth thirty seconds now.
+> `AccessDeniedException: anthropic.claude-opus-5 is not available for this account.`
+> `For additional access options, contact AWS Sales…`
 
-Keep that string to hand — you paste it into the next step.
+Note the wording — *not available for this account*, rather than *not authorized to
+perform*. That is an entitlement decision above IAM, and it affects other vendors'
+flagship models on the same account too, so it is not about Anthropic specifically
+and not something the use case form in 3a changes.
 
-**If no Claude model appears in the London catalogue:** it is not served there yet.
-Go back to step 2c, change `AWS_REGION` to `eu-west-1`, and use Ireland instead — do
-this *before* step 4, since it decides where everything is created. Ireland is still
-in the EU, and no code changes are needed either way.
+So: in the **Playground**, work down from newest until one answers. If Opus 5 is
+refused, try **Opus 4.5**; if the newest Sonnet is refused, try the one before it.
+The app works well on either.
+
+Then go to **Model catalog**, open the model that worked, and **copy its model ID
+exactly as shown** — including any `eu.` prefix and any trailing version suffix.
+Paste it verbatim in the next step. Do not tidy it up or shorten it.
+
+**If every Anthropic model is refused**, open an AWS support case under *Account and
+Billing* (free on any support plan) asking for Bedrock foundation model access. The
+error message is AWS inviting you to ask.
 
 ## 4. Create the infrastructure
 
 1. Repository → **Actions** tab.
 2. **Deploy AWS infrastructure** in the left sidebar → **Run workflow**.
 3. Check the region matches what you chose. In the **model** box, paste the id you
-   copied in step 3b — replacing the default if it differs, prefix included. Leave
-   the retention as it is. → **Run workflow**.
+   copied in step 3b, replacing the default if it differs — prefix, suffix and all.
+   Leave the retention as it is. → **Run workflow**.
 
 It takes roughly 5–10 minutes, mostly creating the Cognito pool.
 
@@ -200,11 +207,10 @@ they differ.
 **Scanning fails with a message about reading the receipt.**
 Look at AWS console → **CloudWatch** → **Log groups** → the group with `ParseFn` in
 its name. The most recent entry says plainly what happened. The two usual causes are
-both from step 3: a model id in the wrong form (`anthropic.…` where the region wants
-`eu.anthropic.…`, or the reverse), which shows up as a validation error naming the
-model; and the Anthropic use case form never having been submitted, which shows up as
-an access-denied error. Both are fixed by redoing step 3 and re-running step 4 with
-the corrected id.
+both from step 3: a model id that does not match the catalogue exactly, which shows
+up as a validation error naming the model; and a model your account is not entitled
+to, which shows up as *"is not available for this account"*. Both are fixed by
+redoing step 3 and re-running step 4 with the corrected id.
 
 **The app shows demo data even though the backend is deployed.**
 The Pages build could not find the stack. Check `AWS_ROLE_ARN` and `AWS_REGION` are
@@ -229,10 +235,9 @@ tier for everything except the model call.
 
 Bedrock is billed separately from the Anthropic API and at its own rates, so treat
 "a few pence" as the right order of magnitude rather than an exact figure — check the
-Bedrock pricing page for your region. If it matters, re-run step 4 and pick
-`anthropic.claude-sonnet-5` or `anthropic.claude-haiku-4-5`: cheaper, and somewhat
-worse at the cryptic abbreviations on supermarket receipts, which is the thing the
-model is really there for.
+Bedrock pricing page for your region. If it matters, re-run step 4 with a Sonnet or Haiku
+id from the catalogue: cheaper, and somewhat worse at the cryptic abbreviations on
+supermarket receipts, which is the thing the model is really there for.
 
 **To set a hard limit:** AWS console → **Billing** → **Budgets** → create a monthly
 budget of a few pounds with an email alert. Worth doing regardless.

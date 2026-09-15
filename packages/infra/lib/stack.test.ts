@@ -17,7 +17,7 @@ beforeAll(() => {
     env: { account: '111111111111', region: 'eu-west-2' },
     siteOrigin: 'https://example.github.io',
     sitePath: '/bill-analyser/',
-    bedrockModelId: 'anthropic.claude-opus-5',
+    bedrockModelId: 'anthropic.claude-opus-4-5',
     photoRetentionDays: 30,
   });
   template = Template.fromStack(stack);
