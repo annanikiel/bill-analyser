@@ -297,7 +297,22 @@ export class BillAnalyserStack extends Stack {
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock-mantle:CreateInference'],
-        resources: [`arn:aws:bedrock-mantle:${this.region}:${this.account}:project/*`],
+        /*
+         * Resource "*", deliberately, after the scoped form did not work.
+         *
+         * Granting this against `arn:aws:bedrock-mantle:<region>:<account>:project/*`
+         * - which is the resource the 403 itself names, and which that wildcard
+         * matches - was still refused with "no identity-based policy allows the
+         * bedrock-mantle:CreateInference action". That is the signature of an action
+         * that does not support resource-level permissions: the statement simply
+         * never matches, whatever ARN is written. Newer services often launch that
+         * way while still echoing the resource in the denial message.
+         *
+         * The breadth is bounded by the action rather than the resource: this grants
+         * exactly one operation, on a service whose only use here is reading
+         * receipts. Worth re-scoping if AWS documents resource-level support later.
+         */
+        resources: ['*'],
       }),
     );
 
