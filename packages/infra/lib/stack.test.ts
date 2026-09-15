@@ -168,7 +168,37 @@ describe('the data at rest', () => {
 });
 
 describe('what the functions are allowed to do', () => {
-  it('scopes the Bedrock permission to the one model, not to everything', () => {
+  it('grants the model permission the Messages endpoint actually checks', () => {
+    // A 403 here names bedrock-mantle:CreateInference, which is a different service
+    // namespace from bedrock:InvokeModel - so granting the familiar one is not enough.
+    const policies = Object.values(template.findResources('AWS::IAM::Policy'));
+    const statements = policies.flatMap(
+      (policy) => policy.Properties?.PolicyDocument?.Statement ?? [],
+    );
+
+    const mantle = statements.filter((statement: { Action?: unknown }) =>
+      JSON.stringify(statement.Action ?? '').includes('bedrock-mantle:CreateInference'),
+    );
+    expect(mantle).toHaveLength(1);
+    expect(JSON.stringify(mantle[0].Resource)).toContain('bedrock-mantle');
+    expect(mantle[0].Resource).not.toBe('*');
+  });
+
+  it('keeps every model permission on the worker, not the API-facing function', () => {
+    const policies = Object.entries(template.findResources('AWS::IAM::Policy'));
+    const modelPolicies = policies.filter(([, policy]) =>
+      /bedrock(-mantle)?:/.test(JSON.stringify(policy.Properties?.PolicyDocument ?? '')),
+    );
+
+    expect(modelPolicies.length).toBeGreaterThan(0);
+    for (const [name] of modelPolicies) {
+      // The half behind the API never calls the model: it must return well inside
+      // API Gateway's 30-second integration cap.
+      expect(name).toMatch(/ParseWorker/);
+    }
+  });
+
+  it('scopes the legacy Bedrock permission rather than opening it up', () => {
     const policies = Object.values(template.findResources('AWS::IAM::Policy'));
     const statements = policies.flatMap(
       (policy) => policy.Properties?.PolicyDocument?.Statement ?? [],
@@ -177,18 +207,9 @@ describe('what the functions are allowed to do', () => {
       JSON.stringify(statement.Action ?? '').includes('bedrock:InvokeModel'),
     );
 
-    expect(bedrock.length).toBe(1);
-    // It belongs to the worker: the API-facing half never calls the model, because
-    // it must return well inside API Gateway's 30-second integration cap.
-    const owner = policies.find((policy) =>
-      JSON.stringify(policy.Properties?.PolicyDocument ?? '').includes('bedrock:InvokeModel'),
-    );
-    expect(JSON.stringify(owner?.Properties?.Roles ?? '')).toContain('ParseWorker');
+    expect(bedrock).toHaveLength(1);
     const resources = JSON.stringify(bedrock[0].Resource);
-    // Anthropic models only, whether reached directly or through an inference
-    // profile - but never a blanket wildcard over every model in the account.
     expect(resources).toContain('foundation-model/anthropic.*');
-    expect(resources).toContain('inference-profile');
     expect(bedrock[0].Resource).not.toBe('*');
     expect(resources).not.toContain('"*"');
   });

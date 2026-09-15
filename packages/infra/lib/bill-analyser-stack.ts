@@ -286,6 +286,23 @@ export class BillAnalyserStack extends Stack {
      * is used - so both forms are granted, still scoped to Anthropic models rather
      * than opened up to "*".
      */
+    /*
+     * The Messages-API endpoint on Bedrock ("Mantle") authorises under its own
+     * service namespace: bedrock-mantle:CreateInference against a project, not
+     * bedrock:InvokeModel against a model ARN. Granting only the latter produces a
+     * 403 naming an action that does not appear anywhere in the policy, which reads
+     * like a typo rather than a wrong service.
+     */
+    parseWorkerFn.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['bedrock-mantle:CreateInference'],
+        resources: [`arn:aws:bedrock-mantle:${this.region}:${this.account}:project/*`],
+      }),
+    );
+
+    // The legacy InvokeModel path, kept so switching to the non-Mantle Bedrock
+    // client stays a one-line change rather than an IAM archaeology exercise.
     parseWorkerFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,

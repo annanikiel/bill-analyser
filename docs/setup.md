@@ -235,6 +235,13 @@ summary from step 4 lists `ExpectedAppUrl` — compare it to your address bar, w
 for a missing trailing slash or a capital letter in your username. Re-run step 4 if
 they differ.
 
+**A fix was deployed but nothing changed.**
+Check you started a *fresh* run rather than re-running an old one. In the Actions
+tab, **Re-run jobs** replays that run's original commit — so anything merged since is
+silently left out, the deploy succeeds, and the old code stays live. Always go to the
+workflow in the left sidebar and use the **Run workflow** button. The deploy now
+refuses to run if it is not on the current `main`, and says so.
+
 **Scanning fails with a message about reading the receipt.**
 Look at AWS console → **CloudWatch** → **Log groups** → the group with `ParseFn` in
 its name. The most recent entry says plainly what happened. The two usual causes are
