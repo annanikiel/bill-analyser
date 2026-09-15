@@ -179,12 +179,14 @@ export class MockApiClient implements ApiClient {
   }
 
   async parseReceipt(_image: Blob, onProgress?: (stage: ParseStage) => void): Promise<Receipt> {
+    // Timings roughly mirror the real backend, where reading happens in a worker
+    // and the app polls for it.
     onProgress?.('uploading');
     await delay(500);
     onProgress?.('reading');
     await delay(1200);
     onProgress?.('categorising');
-    await delay(600);
+    await delay(1400);
 
     const template = MOCK_PARSE_RESULTS[this.state.parseCursor % MOCK_PARSE_RESULTS.length]!;
     this.state.parseCursor += 1;

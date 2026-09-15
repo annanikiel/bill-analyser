@@ -139,7 +139,13 @@ export function ReviewScreen({ id, navigate }: { id: string; navigate: (route: R
         title="Receipt details"
         actions={
           <span className={`status-pill status-${draft.status}`}>
-            {draft.status === 'confirmed' ? 'Confirmed' : 'Needs review'}
+            {draft.status === 'confirmed'
+              ? 'Confirmed'
+              : draft.status === 'parsing'
+                ? 'Reading…'
+                : draft.status === 'failed'
+                  ? 'Could not be read'
+                  : 'Needs review'}
           </span>
         }
       >
@@ -177,6 +183,19 @@ export function ReviewScreen({ id, navigate }: { id: string; navigate: (route: R
           </Field>
         </div>
       </Card>
+
+      {draft.status === 'failed' && (
+        <Banner tone="critical">
+          This receipt could not be read{draft.parseError ? `: ${draft.parseError}` : '.'} The photo
+          is still stored, so you can add the items by hand, or delete this and try a clearer photo.
+        </Banner>
+      )}
+
+      {draft.status === 'parsing' && (
+        <Banner tone="info">
+          Still reading this receipt. It will fill in by itself — reopen it in a moment.
+        </Banner>
+      )}
 
       {draft.imageKey && <ReceiptPhoto receiptId={draft.id} />}
 

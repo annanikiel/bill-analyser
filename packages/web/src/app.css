@@ -1036,6 +1036,15 @@
   background: color-mix(in srgb, var(--good) 16%, var(--surface-1));
 }
 
+.status-parsing {
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+}
+
+.status-failed {
+  background: color-mix(in srgb, var(--critical) 16%, var(--surface-1));
+}
+
 /* ---------- Review ---------- */
 
 .detail-grid {

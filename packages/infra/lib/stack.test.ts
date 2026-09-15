@@ -177,6 +177,12 @@ describe('what the functions are allowed to do', () => {
     );
 
     expect(bedrock.length).toBe(1);
+    // It belongs to the worker: the API-facing half never calls the model, because
+    // it must return well inside API Gateway's 30-second integration cap.
+    const owner = policies.find((policy) =>
+      JSON.stringify(policy.Properties?.PolicyDocument ?? '').includes('bedrock:InvokeModel'),
+    );
+    expect(JSON.stringify(owner?.Properties?.Roles ?? '')).toContain('ParseWorker');
     const resources = JSON.stringify(bedrock[0].Resource);
     // Anthropic models only, whether reached directly or through an inference
     // profile - but never a blanket wildcard over every model in the account.

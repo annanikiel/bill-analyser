@@ -122,13 +122,55 @@ export class HttpApiClient implements ApiClient {
     if (!upload.ok) throw new ApiError('The photo could not be uploaded.', upload.status);
 
     onProgress?.('reading');
-    const receipt = await this.request<Receipt>('/parse', {
+    // Returns as soon as the job is recorded - the reading itself happens in a
+    // worker, because it routinely takes longer than API Gateway will hold a
+    // request open for.
+    const started = await this.request<Receipt>('/parse', {
       method: 'POST',
       body: JSON.stringify({ imageKey: key }),
     });
 
+    const finished = await this.awaitParse(started.id, onProgress);
     onProgress?.('done');
-    return receipt;
+    return finished;
+  }
+
+  /**
+   * Poll a receipt until it has been read.
+   *
+   * Backs off from every second to every four, so a slow read does not hammer the
+   * API, and gives up after three minutes rather than spinning forever - by which
+   * point something has gone wrong that polling will not resolve.
+   */
+  private async awaitParse(
+    id: ReceiptId,
+    onProgress?: (stage: ParseStage) => void,
+  ): Promise<Receipt> {
+    const deadline = Date.now() + 3 * 60 * 1000;
+    let wait = 1000;
+    let announcedCategorising = false;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = Math.min(wait * 1.4, 4000);
+
+      const receipt = await this.request<Receipt>(`/receipts/${encodeURIComponent(id)}`);
+
+      if (receipt.status === 'failed') {
+        throw new ApiError(receipt.parseError ?? 'The receipt could not be read.', 422);
+      }
+      if (receipt.status !== 'parsing') return receipt;
+
+      if (!announcedCategorising) {
+        onProgress?.('categorising');
+        announcedCategorising = true;
+      }
+    }
+
+    throw new ApiError(
+      'Reading this receipt is taking unusually long. It may still finish - check your receipts in a moment.',
+      504,
+    );
   }
 
   updateReceipt(id: ReceiptId, patch: Partial<Omit<Receipt, 'id'>>): Promise<Receipt> {
