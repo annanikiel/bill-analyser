@@ -230,14 +230,23 @@ export class BillAnalyserStack extends Stack {
     photos.grantRead(uploadsFn);
     photos.grantRead(parseFn);
 
+    /*
+     * Bedrock serves newer Claude models through regional inference profiles
+     * (`eu.anthropic.…`) rather than a bare foundation model id, and invoking through
+     * a profile needs permission on both the profile and the underlying models in
+     * every region it may route to. Naming only this region's foundation model ARN
+     * works for a direct model id and then fails confusingly the moment a profile id
+     * is used - so both forms are granted, still scoped to Anthropic models rather
+     * than opened up to "*".
+     */
     parseFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
-        // Scoped to the one model this app calls, in this region.
         resources: [
-          `arn:aws:bedrock:${this.region}::foundation-model/${props.bedrockModelId}`,
-          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/*`,
+          'arn:aws:bedrock:*::foundation-model/anthropic.*',
+          `arn:aws:bedrock:*:${this.account}:inference-profile/*.anthropic.*`,
+          `arn:aws:bedrock:${this.region}:${this.account}:inference-profile/${props.bedrockModelId}`,
         ],
       }),
     );

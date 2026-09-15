@@ -15,14 +15,14 @@ on:
         type: choice
         options: [eu-west-2, eu-west-1, us-east-1]
       model:
-        description: Which Claude model reads the receipts
+        # Free text rather than a fixed list: Bedrock serves some models only via a
+        # regional inference profile ("eu.anthropic.…"), and which form applies
+        # varies by region and changes over time. Copy the exact id from the Bedrock
+        # model catalogue - see docs/setup.md step 3.
+        description: 'Bedrock model id, copied exactly from the Bedrock model catalogue'
         required: true
-        default: anthropic.claude-opus-5
-        type: choice
-        options:
-          - anthropic.claude-opus-5
-          - anthropic.claude-sonnet-5
-          - anthropic.claude-haiku-4-5
+        default: anthropic.claude-opus-4-5
+        type: string
       photo_retention_days:
         description: Days to keep receipt photos before deleting them
         required: true
