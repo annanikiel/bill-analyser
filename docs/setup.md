@@ -75,32 +75,56 @@ and hands out a credential that expires in minutes.
 
 ---
 
-## 3. Switch on Claude in Bedrock
+## 3. Check Claude works in Bedrock, and note its id
 
-Bedrock models are off by default in every AWS account, per region. This is the step
-most likely to be forgotten, and the deploy will succeed without it — you will only
-find out when scanning a receipt fails.
+AWS used to require you to tick a box on a "Model access" page. **That page has been
+retired** — serverless models now enable themselves the first time they are invoked,
+so there is nothing to switch on.
 
-1. AWS console → make sure the region selector (top right) says **Europe (London)
-   eu-west-2**.
-2. **Amazon Bedrock** → **Model access** (left sidebar, near the bottom).
-3. **Modify model access** / **Manage model access**.
-4. Tick the **Anthropic** Claude models → **Next** → **Submit**.
-5. Wait until the status shows **Access granted**. It is usually immediate.
+Two things still need doing, and skipping them means the deploy succeeds and then
+scanning a receipt fails, which is a much more annoying way to find out.
 
-**If Claude is not offered in London:** it is not available in that region yet. Go
-back to step 2c, change `AWS_REGION` to `eu-west-1`, and use Ireland instead — do
+### 3a. Invoke Claude once, by hand
+
+The retirement notice carries a caveat: *for Anthropic models, first-time users may
+need to submit use case details before they can access the model.* That form is
+easiest to deal with now, deliberately, rather than from inside a failing Lambda.
+
+1. Check the region selector (top right) says **Europe (London) eu-west-2**.
+2. **Amazon Bedrock** → **Playground** (under *Test* in the left sidebar).
+3. Pick a **Claude** model, type anything, and send it.
+4. If a use case form appears, fill it in. It is a short form about what you are
+   building; approval is normally immediate.
+
+When you get a reply back, Bedrock is working in your account and region. That is the
+whole point of this step.
+
+### 3b. Copy the exact model id
+
+1. **Amazon Bedrock** → **Model catalog** (left sidebar).
+2. Find the Claude model you just used and open it.
+3. Copy its **model ID**, exactly as shown.
+
+It will look like either `anthropic.claude-opus-5` or `eu.anthropic.claude-opus-5`.
+**The prefix matters.** Some models are served only through a regional *inference
+profile*, which is what the `eu.` prefix means, and passing the wrong form gives a
+validation error when a receipt is scanned. Which form applies varies by region and
+changes over time, which is why this is worth thirty seconds now.
+
+Keep that string to hand — you paste it into the next step.
+
+**If no Claude model appears in the London catalogue:** it is not served there yet.
+Go back to step 2c, change `AWS_REGION` to `eu-west-1`, and use Ireland instead — do
 this *before* step 4, since it decides where everything is created. Ireland is still
-in the EU. No code changes needed either way.
-
----
+in the EU, and no code changes are needed either way.
 
 ## 4. Create the infrastructure
 
 1. Repository → **Actions** tab.
 2. **Deploy AWS infrastructure** in the left sidebar → **Run workflow**.
-3. Check the region matches what you chose, leave the model and retention as they
-   are, → **Run workflow**.
+3. Check the region matches what you chose. In the **model** box, paste the id you
+   copied in step 3b — replacing the default if it differs, prefix included. Leave
+   the retention as it is. → **Run workflow**.
 
 It takes roughly 5–10 minutes, mostly creating the Cognito pool.
 
@@ -174,9 +198,13 @@ for a missing trailing slash or a capital letter in your username. Re-run step 4
 they differ.
 
 **Scanning fails with a message about reading the receipt.**
-Almost always Bedrock model access (step 3), and check you enabled it in the same
-region you deployed to. Actions → the failed run → or AWS console → **CloudWatch** →
-**Log groups** → the one with `ParseFn` in its name will say plainly what happened.
+Look at AWS console → **CloudWatch** → **Log groups** → the group with `ParseFn` in
+its name. The most recent entry says plainly what happened. The two usual causes are
+both from step 3: a model id in the wrong form (`anthropic.…` where the region wants
+`eu.anthropic.…`, or the reverse), which shows up as a validation error naming the
+model; and the Anthropic use case form never having been submitted, which shows up as
+an access-denied error. Both are fixed by redoing step 3 and re-running step 4 with
+the corrected id.
 
 **The app shows demo data even though the backend is deployed.**
 The Pages build could not find the stack. Check `AWS_ROLE_ARN` and `AWS_REGION` are

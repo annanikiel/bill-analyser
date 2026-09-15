@@ -162,8 +162,13 @@ describe('what the functions are allowed to do', () => {
     );
 
     expect(bedrock.length).toBe(1);
-    expect(JSON.stringify(bedrock[0].Resource)).toContain('foundation-model/anthropic.claude-opus-5');
+    const resources = JSON.stringify(bedrock[0].Resource);
+    // Anthropic models only, whether reached directly or through an inference
+    // profile - but never a blanket wildcard over every model in the account.
+    expect(resources).toContain('foundation-model/anthropic.*');
+    expect(resources).toContain('inference-profile');
     expect(bedrock[0].Resource).not.toBe('*');
+    expect(resources).not.toContain('"*"');
   });
 
   it('gives only the upload handler permission to write photos', () => {
