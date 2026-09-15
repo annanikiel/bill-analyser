@@ -117,9 +117,40 @@ So: in the **Playground**, work down from newest until one answers. If Opus 5 is
 refused, try **Opus 4.5**; if the newest Sonnet is refused, try the one before it.
 The app works well on either.
 
-Then go to **Model catalog**, open the model that worked, and **copy its model ID
-exactly as shown** — including any `eu.` prefix and any trailing version suffix.
-Paste it verbatim in the next step. Do not tidy it up or shorten it.
+### 3c. Get the exact model id
+
+The model catalogue is not the most reliable place to read this, because most models
+are actually reached through an *inference profile* whose id differs from the plain
+model name. The Playground will tell you exactly what it just used:
+
+1. In the Playground, after the model has replied, open the **⋮** menu (top right of
+   the chat panel) → **View API request**.
+2. Read the `--model-id` line. It looks like:
+
+   ```
+   --model-id arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0
+   ```
+
+3. The part you want is everything after `inference-profile/`:
+
+   ```
+   eu.anthropic.claude-opus-4-5-20251101-v1:0
+   ```
+
+   Copy that verbatim — the `eu.` prefix, the date, and the `-v1:0` suffix are all
+   part of it. Do not shorten it to `anthropic.claude-opus-4-5`; that is a different
+   identifier and will not resolve.
+
+4. Note the **region** in that same line. It must match the `AWS_REGION` variable you
+   set in step 2c. If it does not, either change the variable or switch the console
+   to the right region and re-test — they have to agree.
+
+> **What the `eu.` prefix means for your data.** It is a *cross-region* profile:
+> AWS may route an individual request to any EU region for capacity, so the receipt
+> photo is processed somewhere in the EU rather than only in the region you deployed
+> to. Your stored data — the receipts, the photos, your login — stays in the region
+> you deploy to. If EU-wide processing is not acceptable, you would need a
+> single-region profile, which is not offered for every model.
 
 **If every Anthropic model is refused**, open an AWS support case under *Account and
 Billing* (free on any support plan) asking for Bedrock foundation model access. The
