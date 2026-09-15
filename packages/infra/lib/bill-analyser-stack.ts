@@ -387,36 +387,44 @@ export class BillAnalyserStack extends Stack {
 }
 
 /**
- * Reject a model id in Bedrock's other naming scheme.
+ * Reject model ids that have been observed not to work, and nothing else.
  *
  * Bedrock names models two ways. `bedrock-runtime` - what the console's Playground
- * and model catalogue show, because it is what the console uses - wants
- * `eu.anthropic.claude-opus-4-5-20251101-v1:0` or an inference-profile ARN. The
- * Messages API endpoint this app calls wants the plain Anthropic name with an
- * `anthropic.` prefix. Copying the id out of the console is therefore the obvious
- * move and the wrong one, and it fails at the first scan with "The model ... does
- * not exist" rather than at deploy time - long after the console made it look right.
+ * and model catalogue show - uses cross-region inference profile ids like
+ * `eu.anthropic.claude-opus-4-5-...` and full ARNs. The Messages API endpoint this
+ * app calls does not recognise either: both were tried against a live account and
+ * returned "The model ... does not exist".
+ *
+ * What it does want is the `anthropic.`-prefixed id from the model card in the
+ * Bedrock user guide, which for some models carries a date and a `-v1:0` suffix and
+ * for others does not. An earlier version of this check rejected the suffixed form
+ * on the assumption that it belonged to the runtime scheme. That assumption was
+ * wrong, and it blocked the id AWS documents - so this now refuses only the two
+ * shapes actually seen to fail, and lets anything else reach the endpoint, which is
+ * the only authority on what it accepts.
  */
 export function assertMessagesApiModelId(modelId: string): void {
-  const wrongScheme =
-    modelId.startsWith('arn:') ||
-    /^(eu|us|apac|global)\./.test(modelId) ||
-    /-v\d+:\d+$/.test(modelId);
-
-  if (wrongScheme) {
+  if (modelId.startsWith('arn:')) {
     throw new Error(
-      `BEDROCK_MODEL_ID "${modelId}" is in the bedrock-runtime naming scheme, which ` +
-        'the Messages API endpoint this app uses does not recognise. Use the plain ' +
-        'Anthropic name with an "anthropic." prefix instead - for example ' +
-        '"anthropic.claude-opus-4-5" - with no region prefix, no date and no -v1:0 ' +
-        'suffix. The console only ever shows the other form. See docs/setup.md step 3c.',
+      `BEDROCK_MODEL_ID "${modelId}" is an ARN. The Messages API endpoint this app ` +
+        'uses takes a model id, not an ARN - for example ' +
+        '"anthropic.claude-opus-4-5-20251101-v1:0". See docs/setup.md step 3c.',
+    );
+  }
+
+  if (/^(eu|us|apac|global)\./.test(modelId)) {
+    throw new Error(
+      `BEDROCK_MODEL_ID "${modelId}" starts with a region prefix, which makes it a ` +
+        'cross-region inference profile id. Those belong to bedrock-runtime and are ' +
+        'not recognised here. Use the "anthropic."-prefixed id from the model card ' +
+        'in the Bedrock user guide. See docs/setup.md step 3c.',
     );
   }
 
   if (!modelId.startsWith('anthropic.')) {
     throw new Error(
       `BEDROCK_MODEL_ID "${modelId}" should start with "anthropic." - for example ` +
-        '"anthropic.claude-opus-4-5". See docs/setup.md step 3c.',
+        '"anthropic.claude-opus-4-5-20251101-v1:0". See docs/setup.md step 3c.',
     );
   }
 }

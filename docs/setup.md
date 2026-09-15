@@ -119,43 +119,41 @@ The app works well on either.
 
 ### 3c. The model id to use
 
-**Do not copy the id from the model catalogue or the Playground.** This is the one
-place the console will actively mislead you, and it cost a long detour here.
+Take it from the **model card in the Bedrock user guide**, not from the Playground or
+the model catalogue. The console shows a different naming scheme from the one this
+app needs, which is an easy and expensive thing to get wrong.
 
-Bedrock has two model-naming schemes, for two different endpoints:
+1. Open the [Bedrock supported models list](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)
+   and find the model that answered for you in step 3a.
+2. Use the **Model ID** from its model card, exactly. For Claude Opus 4.5 that is:
 
-| Endpoint | Model id looks like | Where you see it |
-|---|---|---|
-| `bedrock-runtime` (InvokeModel / Converse) | `eu.anthropic.claude-opus-4-5-20251101-v1:0`, or an `inference-profile/...` ARN | The Playground, the model catalogue, "View API request" |
-| **The Messages API endpoint** — what this app uses | `anthropic.claude-opus-4-5` | Nowhere in the console |
+   ```
+   anthropic.claude-opus-4-5-20251101-v1:0
+   ```
 
-The console only ever shows you the first kind, because that is what the console
-itself uses. Passing one of those to this app gives:
+That is the workflow's default, so usually you change nothing.
 
-> `404 ... The model 'arn:aws:bedrock:...:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0' does not exist`
+**What not to use.** These are the forms the console offers, and none of them
+resolve — each returns *"The model ... does not exist"*:
 
-So use the **second** form: the plain Anthropic model name with an `anthropic.`
-prefix, no region prefix, no date, no `-v1:0`.
-
-| Model | Use this |
+| Don't use | Why |
 |---|---|
-| Claude Opus 4.5 | `anthropic.claude-opus-4-5` |
-| Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5` |
-| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5` |
-| Claude Opus 5, once your account is allowed it | `anthropic.claude-opus-5` |
+| `arn:aws:bedrock:...:inference-profile/...` | An ARN, from "View API request" |
+| `eu.anthropic.claude-opus-4-5-20251101-v1:0` | Region-prefixed cross-region inference profile |
+| `us.anthropic...`, `apac.anthropic...` | Same, other regions |
 
-The workflow already defaults to `anthropic.claude-opus-4-5`, so in most cases you
-change nothing. Step 3a still matters — it is what tells you *which* model your
-account may use; it just is not where the id comes from.
+The deploy refuses those two shapes with an explanation rather than letting them
+fail later at the first scan. It does **not** try to second-guess anything else —
+the endpoint is the only real authority on what it accepts, so any other
+`anthropic.`-prefixed id is passed straight through.
 
 ## 4. Create the infrastructure
 
 1. Repository → **Actions** tab.
 2. **Deploy AWS infrastructure** in the left sidebar → **Run workflow**.
 3. Check the region matches what you chose. Leave the **model** box at its default
-   `anthropic.claude-opus-4-5` unless step 3a showed that model is not available to
-   you, in which case use the matching name from the table in 3c. Leave the retention
-   as it is. → **Run workflow**.
+   unless step 3a showed that model is not available to you, in which case use that
+   model's id from its model card. Leave the retention as it is. → **Run workflow**.
 
 It takes roughly 5–10 minutes, mostly creating the Cognito pool.
 
