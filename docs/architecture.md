@@ -118,8 +118,8 @@ upload time on a phone signal and reduces per-image model cost.
 
 ## Reading the receipt
 
-**Claude via Amazon Bedrock**, one call that does OCR, item extraction and
-categorisation together.
+**The Anthropic API, called directly from the worker Lambda**, with one request that
+does OCR, item extraction and categorisation together.
 
 The reason to do it in one call rather than OCR-then-classify is that grocery
 receipts are written in a private language — `TESCO SEMI SKIM MLK 2PT`,
@@ -129,16 +129,30 @@ thing you do not want to maintain. A model that can read the abbreviation, expan
 to "semi-skimmed milk, 2 pints" and place it in *your* categories does the whole job,
 and gets better at the long tail rather than needing a new rule each time.
 
-Setup notes:
+### Why not Bedrock
 
-- Use the Mantle Bedrock client (`AnthropicBedrockMantle` in the Anthropic SDK), not
-  the legacy `bedrock-runtime` InvokeModel path.
-- Bedrock model ids take an `anthropic.` prefix: `anthropic.claude-opus-5`.
-- Model access has to be enabled for your account in the Bedrock console, per region.
-  Check which region has it before picking one; for UK data residency London or
-  Ireland are the obvious candidates, but confirm availability rather than assuming.
-- Keep the model id in an environment variable. Swapping to a cheaper model is then
-  a config change, not a deployment.
+Bedrock was the original design, and on paper it is the better one: everything stays
+inside one AWS account, on one bill, with IAM rather than an API key. It did not
+survive contact with a real account.
+
+- The newest Claude models were withheld from the account outright — *"is not
+  available for this account"*, which is an entitlement decision above IAM and
+  applied to other vendors' flagship models too.
+- The models that *were* available could not be addressed. Bedrock's Messages
+  endpoint returned *"the model does not exist"* for every documented form: the
+  model card's `anthropic.claude-opus-4-5-20251101-v1:0`, the console's
+  `eu.anthropic.…-v1:0` inference profile, the full ARN, and the undated alias.
+
+That is two separate problems, one of which is not fixable from the code at all. The
+API key route has neither. What it costs: model usage is billed by Anthropic rather
+than appearing on the AWS bill, and there is a secret to look after.
+
+**The key lives in AWS Secrets Manager.** The stack creates the secret with a
+placeholder and grants exactly one function — the parse worker — permission to read
+it. The real value is pasted in through the console, so it never passes through this
+repository, GitHub Actions, or the CloudFormation template. A test asserts the
+template carries only the placeholder, because a template is readable by anyone with
+account read access and sits in the CDK asset bucket.
 
 ### What the model is asked for
 
@@ -165,8 +179,11 @@ receipts are read), and a request for structured JSON:
 }
 ```
 
-Use structured outputs (`output_config.format`) so the response is schema-valid by
-construction rather than parsed hopefully.
+The reply is asked for as JSON in the prompt and validated against that schema on
+arrival, with one retry quoting the specific problem back. Structured outputs would
+be the tidier mechanism, but the handler re-checks everything anyway — hallucinated
+category ids and out-of-range confidences are rejected regardless — and the prompt
+approach works identically whichever model is configured.
 
 **Rules are applied before the model's guesses are accepted.** An item the user has
 already corrected is settled by a DynamoDB lookup — free, instant, and not subject
@@ -175,11 +192,10 @@ to the model changing its mind. Only genuinely new items depend on the guess.
 ### Cost
 
 Roughly a few pence per receipt: a receipt image is on the order of 1,500 input
-tokens and the JSON reply under 1,000 output tokens. At first-party Opus 5 rates
-($5 / $25 per million) that is about 2p. **Bedrock is billed separately from the
-Anthropic API and its rates differ** — check the Bedrock pricing page for your
-region rather than taking that figure as exact. Everything else (Lambda, DynamoDB
-on-demand, S3, API Gateway at this volume) sits inside or near the free tier.
+tokens and the JSON reply under 1,000 output tokens, which at Opus 5 rates
+($5 / $25 per million) is about 2p. That is billed by Anthropic, separately from
+AWS. Everything on the AWS side — Lambda, DynamoDB on-demand, S3, API Gateway at
+this volume — sits inside or near the free tier.
 
 If per-receipt cost matters more than getting the awkward ones right, the model id
 is an environment variable; a smaller model will be cheaper and somewhat worse at

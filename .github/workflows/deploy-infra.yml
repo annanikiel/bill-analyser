@@ -15,13 +15,9 @@ on:
         type: choice
         options: [eu-west-2, eu-west-1, us-east-1]
       model:
-        # Free text rather than a fixed list: Bedrock serves some models only via a
-        # regional inference profile ("eu.anthropic.…"), and which form applies
-        # varies by region and changes over time. Copy the exact id from the Bedrock
-        # model catalogue - see docs/setup.md step 3.
-        description: 'Bedrock model id, copied exactly from the Bedrock model catalogue'
+        description: 'Claude model that reads the receipts (Anthropic naming, e.g. claude-opus-5)'
         required: true
-        default: anthropic.claude-opus-4-5-20251101-v1:0
+        default: claude-opus-5
         type: string
       photo_retention_days:
         description: Days to keep receipt photos before deleting them
@@ -111,7 +107,7 @@ jobs:
           AWS_REGION: ${{ inputs.region }}
           SITE_ORIGIN: ${{ steps.site.outputs.origin }}
           SITE_PATH: /${{ github.event.repository.name }}/
-          BEDROCK_MODEL_ID: ${{ inputs.model }}
+          ANTHROPIC_MODEL: ${{ inputs.model }}
           PHOTO_RETENTION_DAYS: ${{ inputs.photo_retention_days }}
 
       - name: Summarise what was created
@@ -123,7 +119,7 @@ jobs:
             echo "Model: \`${{ inputs.model }}\`"
             echo
             echo "### Next"
-            echo "1. Enable model access for \`${{ inputs.model }}\` in the Bedrock console (once per region)."
+            echo "1. Paste your Anthropic API key into the bill-analyser/anthropic-api-key secret - link below. Scanning fails until you do."
             echo "2. Create your login in the Cognito console - the link is below."
             echo "3. Run the **Deploy web app to GitHub Pages** workflow, which picks these settings up automatically."
             echo

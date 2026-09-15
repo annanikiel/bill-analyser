@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync } from 'n
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BillAnalyserStack, assertMessagesApiModelId } from './bill-analyser-stack.js';
+import { BillAnalyserStack, assertAnthropicModelId } from './bill-analyser-stack.js';
 
 /**
  * These assert the security properties of the deployed infrastructure, not that the
@@ -22,7 +22,7 @@ beforeAll(() => {
     env: { account: '111111111111', region: 'eu-west-2' },
     siteOrigin: 'https://example.github.io',
     sitePath: '/bill-analyser/',
-    bedrockModelId: 'anthropic.claude-opus-4-5',
+    anthropicModel: 'claude-opus-5',
     photoRetentionDays: 30,
   });
   template = Template.fromStack(stack);
@@ -168,55 +168,33 @@ describe('the data at rest', () => {
 });
 
 describe('what the functions are allowed to do', () => {
-  it('grants the model permission the Messages endpoint actually checks', () => {
-    // A 403 here names bedrock-mantle:CreateInference, which is a different service
-    // namespace from bedrock:InvokeModel - so granting the familiar one is not enough.
-    const policies = Object.values(template.findResources('AWS::IAM::Policy'));
-    const statements = policies.flatMap(
-      (policy) => policy.Properties?.PolicyDocument?.Statement ?? [],
-    );
-
-    const mantle = statements.filter((statement: { Action?: unknown }) =>
-      JSON.stringify(statement.Action ?? '').includes('bedrock-mantle:'),
-    );
-    expect(mantle).toHaveLength(1);
-    /*
-     * This one is resource "*" on purpose - the action appears not to support
-     * resource-level permissions (see the stack). So what is pinned instead is that
-     * the breadth stays in the resource and never spreads to the action: exactly one
-     * named operation, never a bedrock-mantle:* wildcard.
-     */
-    expect(mantle[0].Action).toBe('bedrock-mantle:CreateInference');
-  });
-
-  it('keeps every model permission on the worker, not the API-facing function', () => {
+  it('lets only the worker read the API key', () => {
     const policies = Object.entries(template.findResources('AWS::IAM::Policy'));
-    const modelPolicies = policies.filter(([, policy]) =>
-      /bedrock(-mantle)?:/.test(JSON.stringify(policy.Properties?.PolicyDocument ?? '')),
+    const readers = policies.filter(([, policy]) =>
+      JSON.stringify(policy.Properties?.PolicyDocument ?? '').includes('secretsmanager:GetSecretValue'),
     );
 
-    expect(modelPolicies.length).toBeGreaterThan(0);
-    for (const [name] of modelPolicies) {
-      // The half behind the API never calls the model: it must return well inside
-      // API Gateway's 30-second integration cap.
-      expect(name).toMatch(/ParseWorker/);
-    }
+    expect(readers).toHaveLength(1);
+    // Not the half behind the API, which never calls the model, and not the
+    // handlers that only touch the table.
+    expect(readers[0]![0]).toMatch(/ParseWorker/);
   });
 
-  it('scopes the legacy Bedrock permission rather than opening it up', () => {
-    const policies = Object.values(template.findResources('AWS::IAM::Policy'));
-    const statements = policies.flatMap(
-      (policy) => policy.Properties?.PolicyDocument?.Statement ?? [],
-    );
-    const bedrock = statements.filter((statement: { Action?: unknown }) =>
-      JSON.stringify(statement.Action ?? '').includes('bedrock:InvokeModel'),
-    );
+  it('never puts the API key value in the template', () => {
+    /*
+     * The stack creates the secret with a placeholder; the real key is pasted in
+     * through the console. A CloudFormation template is readable by anyone with
+     * read access to the account and is kept in the CDK asset bucket, so a key
+     * reaching it would be a real leak rather than a tidiness problem.
+     */
+    const secrets = Object.values(template.findResources('AWS::SecretsManager::Secret'));
+    expect(secrets).toHaveLength(1);
+    expect(secrets[0]!.Properties?.SecretString).toMatch(/^replace-me/);
+  });
 
-    expect(bedrock).toHaveLength(1);
-    const resources = JSON.stringify(bedrock[0].Resource);
-    expect(resources).toContain('foundation-model/anthropic.*');
-    expect(bedrock[0].Resource).not.toBe('*');
-    expect(resources).not.toContain('"*"');
+  it('keeps the receipt data if the stack is torn down', () => {
+    const secrets = Object.values(template.findResources('AWS::SecretsManager::Secret'));
+    expect(secrets[0]!.DeletionPolicy).toBe('Retain');
   });
 
   it('gives only the upload handler permission to write photos', () => {
@@ -284,35 +262,22 @@ describe('what actually gets deployed', () => {
 
 describe('the model id', () => {
   /*
-   * Only two shapes are refused, and both were observed returning "The model ...
-   * does not exist" against a live account. Everything else is allowed through: an
-   * earlier version of this check also rejected the dated "-v1:0" form on the
-   * assumption it belonged to the runtime scheme, and that assumption was wrong -
-   * it is exactly what the Bedrock model card documents. A guard encoding a guess
-   * about someone else's API is worse than no guard, because it makes the right
-   * answer unreachable.
+   * These are all ids that were tried against Bedrock during this project, so they
+   * are the ones most likely to be pasted in out of habit. None resolve here.
    */
   it.each([
-    'arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0',
-    'eu.anthropic.claude-opus-4-5-20251101-v1:0',
-    'eu.anthropic.claude-opus-4-5',
-    'us.anthropic.claude-opus-4-5',
-  ])('rejects %s, which was tried and did not resolve', (modelId) => {
-    expect(() => assertMessagesApiModelId(modelId)).toThrow(/docs\/setup\.md/);
-  });
-
-  it('rejects a bare model name with no prefix', () => {
-    expect(() => assertMessagesApiModelId('claude-opus-4-5')).toThrow(/anthropic\./);
-  });
-
-  it.each([
-    // The form the Bedrock model card documents.
     'anthropic.claude-opus-4-5-20251101-v1:0',
-    'anthropic.claude-sonnet-4-5-20250929-v1:0',
-    // And the undated alias, for models that use it.
     'anthropic.claude-opus-4-5',
-    'anthropic.claude-opus-5',
-  ])('allows %s through to the endpoint, which is the real authority', (modelId) => {
-    expect(() => assertMessagesApiModelId(modelId)).not.toThrow();
+    'eu.anthropic.claude-opus-4-5-20251101-v1:0',
+    'arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0',
+  ])('rejects the Bedrock-style id %s', (modelId) => {
+    expect(() => assertAnthropicModelId(modelId)).toThrow(/Anthropic API|Claude model/);
   });
+
+  it.each(['claude-opus-5', 'claude-opus-4-5', 'claude-sonnet-5', 'claude-haiku-4-5'])(
+    'accepts the Anthropic name %s',
+    (modelId) => {
+      expect(() => assertAnthropicModelId(modelId)).not.toThrow();
+    },
+  );
 });
