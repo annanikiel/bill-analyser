@@ -284,19 +284,21 @@ describe('what actually gets deployed', () => {
 
 describe('the model id', () => {
   /*
-   * Every one of these is a real value from the AWS console, and every one of them
-   * is wrong for this endpoint. Catching them at deploy time rather than at the
-   * first scan is the whole point: by the time a scan fails, the console has
-   * already made the wrong value look authoritative.
+   * Only two shapes are refused, and both were observed returning "The model ...
+   * does not exist" against a live account. Everything else is allowed through: an
+   * earlier version of this check also rejected the dated "-v1:0" form on the
+   * assumption it belonged to the runtime scheme, and that assumption was wrong -
+   * it is exactly what the Bedrock model card documents. A guard encoding a guess
+   * about someone else's API is worse than no guard, because it makes the right
+   * answer unreachable.
    */
   it.each([
     'arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0',
     'eu.anthropic.claude-opus-4-5-20251101-v1:0',
     'eu.anthropic.claude-opus-4-5',
     'us.anthropic.claude-opus-4-5',
-    'anthropic.claude-opus-4-5-20251101-v1:0',
-  ])('rejects the bedrock-runtime form %s', (modelId) => {
-    expect(() => assertMessagesApiModelId(modelId)).toThrow(/anthropic\.claude/);
+  ])('rejects %s, which was tried and did not resolve', (modelId) => {
+    expect(() => assertMessagesApiModelId(modelId)).toThrow(/docs\/setup\.md/);
   });
 
   it('rejects a bare model name with no prefix', () => {
@@ -304,11 +306,13 @@ describe('the model id', () => {
   });
 
   it.each([
+    // The form the Bedrock model card documents.
+    'anthropic.claude-opus-4-5-20251101-v1:0',
+    'anthropic.claude-sonnet-4-5-20250929-v1:0',
+    // And the undated alias, for models that use it.
     'anthropic.claude-opus-4-5',
-    'anthropic.claude-sonnet-4-5',
-    'anthropic.claude-haiku-4-5',
     'anthropic.claude-opus-5',
-  ])('accepts the Messages API form %s', (modelId) => {
+  ])('allows %s through to the endpoint, which is the real authority', (modelId) => {
     expect(() => assertMessagesApiModelId(modelId)).not.toThrow();
   });
 });

@@ -28,7 +28,7 @@ new BillAnalyserStack(app, process.env.STACK_NAME ?? 'BillAnalyser', {
   // Defaults to the previous Opus generation rather than the current one: Bedrock
   // gates its newest flagship models per account, and 4.5 is reachable on accounts
   // where 5 is not. Override with whatever the Bedrock model catalogue lists.
-  bedrockModelId: process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-opus-4-5',
+  bedrockModelId: process.env.BEDROCK_MODEL_ID ?? 'anthropic.claude-opus-4-5-20251101-v1:0',
   photoRetentionDays: Number(process.env.PHOTO_RETENTION_DAYS ?? 30),
   description: 'Receipt scanning and spend categorisation (bill-analyser)',
 });
