@@ -11,6 +11,7 @@ import {
 import { useActiveCategories, useAppData } from '../lib/store.js';
 import { hrefFor, type Route } from '../lib/router.js';
 import { Banner, Button, Card, ColourDot, Field, Spinner } from '../components/ui.js';
+import { ReceiptPhoto } from '../components/ReceiptPhoto.js';
 
 /** Below this, the model is guessing rather than reading, and the item is flagged. */
 const LOW_CONFIDENCE = 0.6;
@@ -176,6 +177,8 @@ export function ReviewScreen({ id, navigate }: { id: string; navigate: (route: R
           </Field>
         </div>
       </Card>
+
+      {draft.imageKey && <ReceiptPhoto receiptId={draft.id} />}
 
       {!balance.balanced && (
         <Banner tone={Math.abs(balance.differenceMinor) > 500 ? 'warning' : 'info'}>

@@ -16,5 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Includes the infrastructure tests, which assert that sign-up stays closed,
+      # every route stays behind the authorizer, and the buckets stay private.
       - run: npm test
       - run: npm run build

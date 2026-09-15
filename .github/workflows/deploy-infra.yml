@@ -1,0 +1,118 @@
+name: Deploy AWS infrastructure
+
+# Run this from the Actions tab: pick "Deploy AWS infrastructure" on the left,
+# then "Run workflow". It is safe to run repeatedly - CloudFormation applies only
+# what has changed, and the receipt data, photo bucket and login pool are all
+# marked to survive even a stack deletion.
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: AWS region to deploy into
+        required: true
+        default: eu-west-2
+        type: choice
+        options: [eu-west-2, eu-west-1, us-east-1]
+      model:
+        description: Which Claude model reads the receipts
+        required: true
+        default: anthropic.claude-opus-5
+        type: choice
+        options:
+          - anthropic.claude-opus-5
+          - anthropic.claude-sonnet-5
+          - anthropic.claude-haiku-4-5
+      photo_retention_days:
+        description: Days to keep receipt photos before deleting them
+        required: true
+        default: '30'
+
+permissions:
+  contents: read
+  # Required for OIDC. Without it the role assumption below cannot get a token.
+  id-token: write
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Two ways in. OIDC is preferred: GitHub proves who it is and AWS hands back
+      # a short-lived credential, so there is no long-lived key to leak. Access keys
+      # are the fallback if setting up the identity provider proves fiddly.
+      - name: Authenticate to AWS (OIDC)
+        if: vars.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Authenticate to AWS (access keys)
+        if: vars.AWS_ROLE_ARN == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Work out the site URL
+        id: site
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "origin=https://${owner}.github.io" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm which account is being deployed to
+        run: aws sts get-caller-identity
+
+      - name: Check infrastructure tests
+        run: npm run test --workspace @bill/infra
+
+      # Idempotent: does nothing after the first time, and saves having to remember
+      # that CDK needs a one-off bootstrap per account and region.
+      - name: Bootstrap CDK
+        working-directory: packages/infra
+        run: npx cdk bootstrap --require-approval never
+        env:
+          AWS_REGION: ${{ inputs.region }}
+          SITE_ORIGIN: https://placeholder.invalid
+
+      - name: Deploy
+        working-directory: packages/infra
+        run: npx cdk deploy --require-approval never --outputs-file outputs.json
+        env:
+          AWS_REGION: ${{ inputs.region }}
+          SITE_ORIGIN: ${{ steps.site.outputs.origin }}
+          SITE_PATH: /${{ github.event.repository.name }}/
+          BEDROCK_MODEL_ID: ${{ inputs.model }}
+          PHOTO_RETENTION_DAYS: ${{ inputs.photo_retention_days }}
+
+      - name: Summarise what was created
+        run: |
+          {
+            echo "## Infrastructure deployed"
+            echo
+            echo "Region: \`${{ inputs.region }}\`"
+            echo "Model: \`${{ inputs.model }}\`"
+            echo
+            echo "### Next"
+            echo "1. Enable model access for \`${{ inputs.model }}\` in the Bedrock console (once per region)."
+            echo "2. Create your login in the Cognito console - the link is below."
+            echo "3. Run the **Deploy web app to GitHub Pages** workflow, which picks these settings up automatically."
+            echo
+            echo '```json'
+            cat packages/infra/outputs.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

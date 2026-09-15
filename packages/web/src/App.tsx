@@ -3,6 +3,8 @@ import { AppDataProvider, useAppData } from './lib/store.js';
 import { hrefFor, useRoute, type Route } from './lib/router.js';
 import { applyThemeChoice, readThemeChoice, type ThemeChoice } from './lib/theme-toggle.js';
 import { isMockBackend, MockApiClient } from './api/index.js';
+import { AuthGate } from './auth/AuthGate.js';
+import { signedInEmail } from './auth/cognito.js';
 import { SummaryScreen } from './screens/Summary.js';
 import { CaptureScreen } from './screens/Capture.js';
 import { ReviewScreen } from './screens/Review.js';
@@ -16,7 +18,7 @@ const NAV: { route: Route; label: string; icon: string }[] = [
   { route: { name: 'categories' }, label: 'Categories', icon: '◑' },
 ];
 
-function Shell() {
+function Shell({ onSignOut }: { onSignOut: () => void }) {
   const [route, navigate] = useRoute();
   const [theme, setTheme] = useState<ThemeChoice>(() => readThemeChoice());
   const { receipts, refresh } = useAppData();
@@ -35,6 +37,12 @@ function Shell() {
         </a>
         <div className="app-header-actions">
           {isMockBackend && <span className="demo-badge">Demo data</span>}
+          {!isMockBackend && (
+            <button type="button" className="signout-button" onClick={onSignOut}>
+              <span className="signout-email">{signedInEmail() ?? 'Signed in'}</span>
+              <span>Sign out</span>
+            </button>
+          )}
           <select
             className="theme-select"
             aria-label="Colour theme"
@@ -106,8 +114,12 @@ function Shell() {
 
 export function App() {
   return (
-    <AppDataProvider>
-      <Shell />
-    </AppDataProvider>
+    <AuthGate>
+      {(onSignOut) => (
+        <AppDataProvider>
+          <Shell onSignOut={onSignOut} />
+        </AppDataProvider>
+      )}
+    </AuthGate>
   );
 }

@@ -9,18 +9,23 @@ bank statement can tell you, because the bank only sees "TESCO £47.31".
 
 ## Current state
 
-The **front end is complete and runs on sample data**. You can try the whole flow —
-scan, review, correct, confirm, summarise — without an AWS account or a penny of
-spend. The AWS backend is designed and documented but not yet built; see
-[docs/architecture.md](docs/architecture.md).
+Complete and deployable. The front end, the AWS backend, and the deployment
+pipeline all exist.
+
+**Try it without deploying anything.** With no backend configured the app runs
+entirely in your browser on generated sample data — no AWS account, no cost, no
+sign-in:
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
 ```
 
-Everything is held in your browser's local storage. Nothing is uploaded. "Reset demo
-data" in the footer puts it back to the start.
+"Reset demo data" in the footer puts it back to the start.
+
+**To run it for real:** [docs/setup.md](docs/setup.md) walks through deploying it,
+click by click. Every step is in the AWS console or on the GitHub website — there is
+no command line, and the deployment itself runs from the GitHub Actions tab.
 
 ## What it does
 
@@ -62,14 +67,21 @@ The repository is public; the data is not, and never can be.
 - The repo and the deployed site contain **no spending data and no credentials** —
   only the app's code. Data exists solely in AWS, behind a login.
 - Sign-in is Amazon Cognito with **self-registration turned off**, so accounts exist
-  only when you create one. MFA is a few clicks and worth it.
-- Every API route requires a valid token, checked by API Gateway before any code
-  runs. Every record is keyed by the user id **taken from the token**, never from the
-  request — so there is no code path where a caller can ask for someone else's data.
-- Receipt photos live in a private S3 bucket and are only ever reached through
-  short-lived presigned URLs.
+  only when you create one from the console. A stranger who finds the repository can
+  read the code and open the app; they cannot get in.
+- Every API route requires a valid token, checked by API Gateway *before* any code
+  runs — an unauthenticated request never reaches a Lambda.
+- Every record is keyed by the user id **taken from the token**, never from the
+  request. There is no code path where a caller can name whose data to read, so a bug
+  in a handler cannot return someone else's receipts.
+- Receipt photos live in a private, encrypted bucket reached only through short-lived
+  presigned URLs, and are deleted automatically after 30 days.
+- Sign-in uses PKCE, so there is no client secret to leak, and an intercepted
+  authorization code is useless on its own.
 
-The full reasoning, including what is deliberately public and why, is in
+These are not just claims in a document: `packages/infra/lib/stack.test.ts` asserts
+each of them against the synthesised infrastructure, and runs in CI. The reasoning,
+including what is deliberately public and why, is in
 [docs/architecture.md](docs/architecture.md).
 
 ## Layout
@@ -77,11 +89,15 @@ The full reasoning, including what is deliberately public and why, is in
 ```
 packages/
   shared/    Domain model and logic — money, dates, aggregation, rule learning.
-             Unit tested, and shared with the backend when it is built.
-  web/       React app. Talks only to the ApiClient interface in src/api/types.ts,
-             so the mock and the real backend are interchangeable.
+             Unit tested, and imported by both the browser and the Lambdas, so the
+             rule the app predicts and the rule the server writes cannot diverge.
+  web/       React app and Cognito sign-in. Talks only to the ApiClient interface,
+             so the demo and real backends are interchangeable.
+  infra/     CDK stack and Lambda handlers, with tests that assert the security
+             properties rather than trusting the source to still say what it said.
 docs/
-  architecture.md    The AWS design, the security model, and what comes next.
+  setup.md          Click-by-click deployment. No terminal required.
+  architecture.md   The design, and the reasoning behind the security model.
 ```
 
 ## Commands
@@ -93,19 +109,16 @@ npm run typecheck  # whole workspace
 npm run build      # production build into packages/web/dist
 ```
 
-## Deploying the front end
+## Deploying
 
-Pushing to `main` builds and publishes to GitHub Pages via
-`.github/workflows/deploy-web.yml`. Enable Pages for the repository with "GitHub
-Actions" as the source and it works with no further configuration — it will publish
-the demo-data version until the backend exists.
+See [docs/setup.md](docs/setup.md). In short:
 
-Once the backend is built, set these as repository **variables** (not secrets —
-neither is a credential, and both are visible in any shipped front end):
+- **Deploy AWS infrastructure** (Actions tab) creates the stack.
+- **Deploy web app to GitHub Pages** builds and publishes the front end, reading the
+  API address and login settings straight out of the deployed stack — so those values
+  are never copied by hand and cannot drift out of date.
+- With no stack found, the same workflow publishes the demo-data version. That is
+  what a fork of this repository gets, and it is why the app is always runnable.
 
-- `VITE_API_BASE_URL`
-- `VITE_COGNITO_USER_POOL_ID`
-- `VITE_COGNITO_CLIENT_ID`
-
-Routing is hash-based (`#/receipts`) because a static host cannot serve a path that
-has no file behind it; this way refreshing on any screen works.
+Routing is hash-based (`#/receipts`) because a static host cannot serve a path with
+no file behind it; this way refreshing on any screen works.

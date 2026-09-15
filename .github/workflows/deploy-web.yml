@@ -1,5 +1,10 @@
 name: Deploy web app to GitHub Pages
 
+# Publishes the front end. If AWS credentials are configured it reads the API and
+# login settings straight out of the deployed CloudFormation stack, so those values
+# never have to be copied by hand and cannot drift out of date. With no credentials
+# configured it publishes the demo-data version, which is also what a fork gets.
+
 on:
   push:
     branches: [main]
@@ -11,9 +16,6 @@ on:
       - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
-# Only the contents of packages/web/dist are published. Nothing in this repository
-# is secret - the app's configuration is public identifiers (a Cognito user pool id,
-# an API URL), never credentials. Spending data lives in AWS behind a login.
 permissions:
   contents: read
   pages: write
@@ -26,6 +28,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # `secrets` cannot be read from a step-level `if`; `env` can.
+      HAS_ACCESS_KEYS: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,23 +45,67 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        run: npm run test --workspace @bill/shared
+
+      - name: Authenticate to AWS (OIDC)
+        id: aws-oidc
+        if: vars.AWS_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+
+      - name: Authenticate to AWS (access keys)
+        if: vars.AWS_ROLE_ARN == '' && env.HAS_ACCESS_KEYS == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-2' }}
+
+      - name: Read settings from the deployed stack
+        id: stack
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          outputs=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs' --output json 2>/dev/null) || {
+              echo "No stack found - building in demo mode."
+              exit 0
+            }
+          get() { echo "$outputs" | jq -r --arg k "$1" '.[] | select(.OutputKey==$k) | .OutputValue'; }
+          {
+            echo "api=$(get ApiBaseUrl)"
+            echo "pool=$(get UserPoolId)"
+            echo "client=$(get UserPoolClientId)"
+            echo "domain=$(get CognitoDomain)"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          STACK_NAME: ${{ vars.STACK_NAME || 'BillAnalyser' }}
 
       - name: Build
         run: npm run build
         env:
-          # Serve from https://<user>.github.io/<repo>/
           VITE_BASE: /${{ github.event.repository.name }}/
-          # Repository variables, not secrets: neither is a credential, and both are
-          # visible in the shipped JavaScript either way. Leave unset to publish the
-          # app running on in-browser demo data.
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+          # Empty when no stack was found, which is exactly what puts the app into
+          # demo mode. All four are public identifiers, not credentials.
+          VITE_API_BASE_URL: ${{ steps.stack.outputs.api }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.stack.outputs.pool }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.stack.outputs.client }}
+          VITE_COGNITO_DOMAIN: ${{ steps.stack.outputs.domain }}
+
+      - name: Report which mode was published
+        run: |
+          if [ -n "${{ steps.stack.outputs.api }}" ]; then
+            echo "Published against the deployed AWS backend." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Published in **demo mode** - no AWS stack was found, so the app runs on sample data held in the browser." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Add SPA fallback
-        # Pages serves 404.html for unknown paths. Routing is hash-based so this is
-        # only a safety net for someone landing on a stale path-style link.
+        # Routing is hash-based, so this is only a safety net for a stale path-style
+        # link; Pages serves 404.html for anything it cannot find.
         run: cp packages/web/dist/index.html packages/web/dist/404.html
 
       - uses: actions/upload-pages-artifact@v3

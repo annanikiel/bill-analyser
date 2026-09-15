@@ -1314,3 +1314,94 @@
 .rule-list li > :last-child {
   margin-left: auto;
 }
+
+/* ---------- Sign in ---------- */
+
+.signin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.signin-checking {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.signin-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 26px 24px;
+}
+
+.signin-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.signin-body {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.signout-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.signout-button:hover {
+  background: var(--surface-sunken);
+}
+
+.signout-email {
+  color: var(--text-muted);
+  font-size: 11px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Receipt photo ---------- */
+
+.photo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.photo-panel img {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.photo-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}

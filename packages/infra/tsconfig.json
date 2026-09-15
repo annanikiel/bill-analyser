@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": false,
+    "types": ["node"],
+    // CDK constructs and the AWS SDK use parameter properties and decorators that
+    // sit awkwardly with the strictest unused checks; the handlers keep them.
+    "noUnusedParameters": false
+  },
+  "include": ["bin/**/*", "lib/**/*", "src/**/*"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../shared" }]
+}

@@ -195,23 +195,56 @@ the model's mistakes in place where they could never be revised.
 Every rule is visible and deletable on the Categories screen, so the behaviour is
 never mysterious — you can see exactly why something was categorised the way it was.
 
-## What is built, and what is next
+## What is built
 
-**Built (this phase).** The complete front end, running against an in-browser mock
-that implements the real learning behaviour. Capture, review and correction, category
-and rule management, and date-ranged summaries all work; the domain logic —
-money arithmetic, date bucketing, aggregation, rule derivation — lives in
-`packages/shared` and is unit tested, so it moves to the backend unchanged.
+All of it. The front end, the AWS stack, the handlers, and the model call.
 
-**Next (phase 2).**
+- `packages/shared` — the domain model and logic: money arithmetic, date bucketing,
+  summary aggregation, item-text normalisation and rule derivation. Unit tested, and
+  imported by both the browser and the Lambda handlers, so the rule the app predicts
+  and the rule the server writes cannot drift apart.
+- `packages/web` — the React app, Cognito sign-in, and two interchangeable backends
+  (`MockApiClient` for demo data, `HttpApiClient` for the real one) behind one
+  interface.
+- `packages/infra` — the CDK stack and the Lambda handlers, with tests that assert
+  the security properties below rather than trusting the source to still say what it
+  said.
 
-1. CDK stack: Cognito pool (self-registration off, MFA on), HTTP API with a JWT
-   authorizer, Lambda handlers, DynamoDB table, S3 bucket.
-2. `HttpApiClient` implementing the same `ApiClient` interface the mock implements,
-   selected automatically when `VITE_API_BASE_URL` is set. Nothing above that
-   interface changes.
-3. The Bedrock parse handler and its prompt.
-4. Login screen in front of the app.
+`docs/setup.md` is the click-by-click deployment guide. Nothing in it needs a terminal.
 
-The seam is already in place: `packages/web/src/api/index.ts` picks the client, and
-the UI depends only on the interface in `api/types.ts`.
+### The infrastructure tests
+
+`packages/infra/lib/stack.test.ts` synthesises the stack and asserts the claims this
+document makes — that self-registration is off, that every route carries the JWT
+authorizer, that the photo bucket blocks public access and refuses plaintext, that
+photos expire, that the Bedrock permission names one model rather than `*`, and that
+the data stores survive a stack deletion. They run in CI on every change.
+
+This matters more than the usual test: a security property that is quietly weakened
+by an unrelated refactor produces no failing feature and no error, just a system that
+is no longer what its documentation says it is.
+
+### Where demo mode comes from
+
+The app is built without backend configuration unless a deployed stack is found, and
+in that state it runs entirely in the browser on generated sample data. That is not a
+leftover scaffold — it is what makes the repository useful to clone, what the Pages
+site serves before AWS exists, and what the UI can be developed against without
+spending anything.
+
+## Possible next steps
+
+None of these are needed for the app to do its job.
+
+- **Server-side summaries.** Right now the browser fetches the receipts and
+  aggregates locally, which keeps range changes instant and guarantees every figure
+  on screen comes from one consistent snapshot. Past a few years of receipts the
+  initial fetch would be worth moving to a Lambda that returns the aggregate — the
+  aggregation function is already shared, so it would move unchanged.
+- **A written record of what the model got wrong.** The confidence score is captured
+  per item but never looked at afterwards. Comparing it against which items you
+  actually corrected would say whether the model's uncertainty is honest, and whether
+  the low-confidence threshold in the review screen is set in the right place.
+- **Multiple people.** The data model is already partitioned by user id, so a second
+  login needs no migration. A *shared household view* would be a real change: it
+  needs a notion of a household that owns receipts, rather than a person.

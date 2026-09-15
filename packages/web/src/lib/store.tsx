@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { Category, CategoryRule, Receipt } from '@bill/shared';
 import { createApiClient, type ApiClient } from '../api/index.js';
+import { clearLocalSession } from '../auth/cognito.js';
 
 /**
  * One load of everything, held in memory.
@@ -37,7 +38,16 @@ interface AppData {
 const AppDataContext = createContext<AppData | null>(null);
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
-  const api = useMemo(() => createApiClient(), []);
+  // A session that ends mid-use drops the stored tokens and reloads, which puts the
+  // AuthGate back in front of the app rather than leaving failing requests on screen.
+  const api = useMemo(
+    () =>
+      createApiClient(() => {
+        clearLocalSession();
+        window.location.reload();
+      }),
+    [],
+  );
   const [categories, setCategories] = useState<Category[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [rules, setRules] = useState<CategoryRule[]>([]);

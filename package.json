@@ -5,13 +5,15 @@
   "type": "module",
   "workspaces": [
     "packages/shared",
-    "packages/web"
+    "packages/web",
+    "packages/infra"
   ],
   "scripts": {
     "dev": "npm run dev --workspace @bill/web",
     "build": "npm run build --workspace @bill/shared && npm run build --workspace @bill/web",
-    "typecheck": "tsc --build packages/shared packages/web",
-    "test": "npm run test --workspace @bill/shared"
+    "typecheck": "tsc --build packages/shared packages/web packages/infra",
+    "test": "npm run test --workspace @bill/shared && npm run test --workspace @bill/infra",
+    "synth": "npm run synth --workspace @bill/infra"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
