@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync } from 'n
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BillAnalyserStack } from './bill-analyser-stack.js';
+import { BillAnalyserStack, assertMessagesApiModelId } from './bill-analyser-stack.js';
 
 /**
  * These assert the security properties of the deployed infrastructure, not that the
@@ -279,5 +279,36 @@ describe('what actually gets deployed', () => {
       const loaded = require_(join(dir, 'index.js')) as { handler?: unknown };
       expect(typeof loaded.handler, `${asset} does not export a handler`).toBe('function');
     }
+  });
+});
+
+describe('the model id', () => {
+  /*
+   * Every one of these is a real value from the AWS console, and every one of them
+   * is wrong for this endpoint. Catching them at deploy time rather than at the
+   * first scan is the whole point: by the time a scan fails, the console has
+   * already made the wrong value look authoritative.
+   */
+  it.each([
+    'arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0',
+    'eu.anthropic.claude-opus-4-5-20251101-v1:0',
+    'eu.anthropic.claude-opus-4-5',
+    'us.anthropic.claude-opus-4-5',
+    'anthropic.claude-opus-4-5-20251101-v1:0',
+  ])('rejects the bedrock-runtime form %s', (modelId) => {
+    expect(() => assertMessagesApiModelId(modelId)).toThrow(/anthropic\.claude/);
+  });
+
+  it('rejects a bare model name with no prefix', () => {
+    expect(() => assertMessagesApiModelId('claude-opus-4-5')).toThrow(/anthropic\./);
+  });
+
+  it.each([
+    'anthropic.claude-opus-4-5',
+    'anthropic.claude-sonnet-4-5',
+    'anthropic.claude-haiku-4-5',
+    'anthropic.claude-opus-5',
+  ])('accepts the Messages API form %s', (modelId) => {
+    expect(() => assertMessagesApiModelId(modelId)).not.toThrow();
   });
 });

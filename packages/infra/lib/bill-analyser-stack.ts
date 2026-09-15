@@ -56,6 +56,8 @@ export class BillAnalyserStack extends Stack {
 
     const appUrl = `${props.siteOrigin}${props.sitePath}`;
 
+    assertMessagesApiModelId(props.bedrockModelId);
+
     /* ---------------------------------------------------------------------
      * Who you are
      * ------------------------------------------------------------------ */
@@ -381,5 +383,40 @@ export class BillAnalyserStack extends Stack {
       value: appUrl,
       description: 'The app URL this stack was deployed for. Login fails if it differs.',
     });
+  }
+}
+
+/**
+ * Reject a model id in Bedrock's other naming scheme.
+ *
+ * Bedrock names models two ways. `bedrock-runtime` - what the console's Playground
+ * and model catalogue show, because it is what the console uses - wants
+ * `eu.anthropic.claude-opus-4-5-20251101-v1:0` or an inference-profile ARN. The
+ * Messages API endpoint this app calls wants the plain Anthropic name with an
+ * `anthropic.` prefix. Copying the id out of the console is therefore the obvious
+ * move and the wrong one, and it fails at the first scan with "The model ... does
+ * not exist" rather than at deploy time - long after the console made it look right.
+ */
+export function assertMessagesApiModelId(modelId: string): void {
+  const wrongScheme =
+    modelId.startsWith('arn:') ||
+    /^(eu|us|apac|global)\./.test(modelId) ||
+    /-v\d+:\d+$/.test(modelId);
+
+  if (wrongScheme) {
+    throw new Error(
+      `BEDROCK_MODEL_ID "${modelId}" is in the bedrock-runtime naming scheme, which ` +
+        'the Messages API endpoint this app uses does not recognise. Use the plain ' +
+        'Anthropic name with an "anthropic." prefix instead - for example ' +
+        '"anthropic.claude-opus-4-5" - with no region prefix, no date and no -v1:0 ' +
+        'suffix. The console only ever shows the other form. See docs/setup.md step 3c.',
+    );
+  }
+
+  if (!modelId.startsWith('anthropic.')) {
+    throw new Error(
+      `BEDROCK_MODEL_ID "${modelId}" should start with "anthropic." - for example ` +
+        '"anthropic.claude-opus-4-5". See docs/setup.md step 3c.',
+    );
   }
 }
