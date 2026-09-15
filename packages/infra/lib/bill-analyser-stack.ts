@@ -218,7 +218,24 @@ export class BillAnalyserStack extends Stack {
           retention: RetentionDays.ONE_MONTH,
           removalPolicy: RemovalPolicy.DESTROY,
         }),
-        bundling: { format: OutputFormat.ESM, target: 'node22', minify: true, sourceMap: true },
+        bundling: {
+          format: OutputFormat.ESM,
+          target: 'node22',
+          minify: true,
+          sourceMap: true,
+          /*
+           * Bundle everything, including the AWS SDK.
+           *
+           * NodejsFunction leaves `@aws-sdk/*` out of the bundle by default, because
+           * the older Lambda Node runtimes shipped the SDK and importing the
+           * provided copy kept deployments small. The Node 22 runtime does not ship
+           * it. Left on the default, every handler here imports a module that is not
+           * there and dies at cold start - which surfaces as API Gateway's bare
+           * "Internal Server Error", with nothing in the handler's own logs, because
+           * the failure happens before any of its code runs.
+           */
+          externalModules: [],
+        },
       });
 
     // Reading a receipt waits on the model, so it gets a long timeout and more

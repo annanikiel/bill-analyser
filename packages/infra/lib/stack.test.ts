@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
+import { readFileSync, readdirSync } from 'node:fs';
+import { builtinModules } from 'node:module';
+import { join } from 'node:path';
 import { BillAnalyserStack } from './bill-analyser-stack.js';
 
 /**
@@ -10,9 +13,10 @@ import { BillAnalyserStack } from './bill-analyser-stack.js';
  */
 
 let template: Template;
+let app: App;
 
 beforeAll(() => {
-  const app = new App();
+  app = new App();
   const stack = new BillAnalyserStack(app, 'TestStack', {
     env: { account: '111111111111', region: 'eu-west-2' },
     siteOrigin: 'https://example.github.io',
@@ -189,5 +193,40 @@ describe('what the functions are allowed to do', () => {
     );
     expect(writers).toHaveLength(1);
     expect(writers[0]![0]).toMatch(/Uploads/);
+  });
+});
+
+describe('what actually gets deployed', () => {
+  /*
+   * A missing dependency in a Lambda bundle cannot be caught by inspecting the
+   * CloudFormation template - the template is identical either way. It only shows up
+   * at cold start, as API Gateway's bare "Internal Server Error" with nothing in the
+   * function's own logs, because the failure happens before any handler code runs.
+   * So this reads the bundles themselves.
+   */
+  it('bundles every dependency rather than expecting the runtime to provide it', () => {
+    const assembly = app.synth();
+
+    const bundles = readdirSync(assembly.directory)
+      .filter((entry) => entry.startsWith('asset.') && entry.endsWith('.mjs') === false)
+      .map((entry) => join(assembly.directory, entry, 'index.mjs'));
+
+    expect(bundles.length).toBeGreaterThan(0);
+
+    for (const bundle of bundles) {
+      const code = readFileSync(bundle, 'utf8');
+      const external = [...code.matchAll(/from"([^"]+)"/g)]
+        .map((match) => match[1]!)
+        // A bare specifier is one the runtime has to supply. Relative paths are in
+        // the bundle, and Node builtins genuinely are provided - with or without the
+        // node: prefix, which bundled dependencies are inconsistent about.
+        .filter((specifier) => !specifier.startsWith('.'))
+        .filter((specifier) => !specifier.startsWith('node:'))
+        .filter((specifier) => !builtinModules.includes(specifier))
+        // Strings that merely look like imports inside the minified code.
+        .filter((specifier) => /^(@[\w.-]+\/)?[\w.-]+$/.test(specifier));
+
+      expect(external, `${bundle} expects the runtime to provide: ${external.join(', ')}`).toEqual([]);
+    }
   });
 });
