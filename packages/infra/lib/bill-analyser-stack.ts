@@ -29,7 +29,7 @@ import {
 import { HttpApi, HttpMethod, CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
@@ -219,7 +219,18 @@ export class BillAnalyserStack extends Stack {
           removalPolicy: RemovalPolicy.DESTROY,
         }),
         bundling: {
-          format: OutputFormat.ESM,
+          /*
+           * CommonJS, not ESM.
+           *
+           * Bundling to ESM rewrites the CommonJS dependencies underneath, and any
+           * require() esbuild cannot resolve statically becomes a shim that throws
+           * "Dynamic require of X is not supported" the moment the module loads.
+           * Parts of the AWS SDK's dependency tree do exactly that. It fails at
+           * init, before any handler code runs, so it surfaces as API Gateway's bare
+           * "Internal Server Error" with an empty-looking log.
+           *
+           * Nothing here needs ESM, and CommonJS is what the runtime wants anyway.
+           */
           target: 'node22',
           minify: true,
           sourceMap: true,

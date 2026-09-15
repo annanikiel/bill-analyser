@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { readFileSync, readdirSync } from 'node:fs';
-import { builtinModules } from 'node:module';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BillAnalyserStack } from './bill-analyser-stack.js';
 
@@ -204,35 +205,53 @@ describe('what the functions are allowed to do', () => {
 
 describe('what actually gets deployed', () => {
   /*
-   * A missing dependency in a Lambda bundle cannot be caught by inspecting the
-   * CloudFormation template - the template is identical either way. It only shows up
-   * at cold start, as API Gateway's bare "Internal Server Error" with nothing in the
-   * function's own logs, because the failure happens before any handler code runs.
-   * So this reads the bundles themselves.
+   * Load every bundle the way the Lambda runtime does at cold start.
+   *
+   * This is the only check that catches a packaging fault, and packaging faults are
+   * the worst kind to debug here: the CloudFormation template is byte-identical
+   * whether or not a bundle can load, the failure happens before any handler code
+   * runs, and what reaches the browser is API Gateway's bare "Internal Server
+   * Error". Two real faults would have been caught by this and were not caught by
+   * anything else - dependencies left out of the bundle, and an ESM output format
+   * that turned a dependency's require() into a shim that throws on load.
+   *
+   * The copy into a temp directory matters: this repository is "type": "module", so
+   * requiring a .js file in place makes Node treat it as ESM. Lambda deploys the
+   * asset on its own, with no package.json above it, which means CommonJS.
    */
-  it('bundles every dependency rather than expecting the runtime to provide it', () => {
+  it('produces bundles that load and export a handler', () => {
     const assembly = app.synth();
+    const require_ = createRequire(import.meta.url);
+    const staging = mkdtempSync(join(tmpdir(), 'bundle-check-'));
 
-    const bundles = readdirSync(assembly.directory)
-      .filter((entry) => entry.startsWith('asset.') && entry.endsWith('.mjs') === false)
-      .map((entry) => join(assembly.directory, entry, 'index.mjs'));
+    const assetDirs = readdirSync(assembly.directory).filter((entry) => entry.startsWith('asset.'));
 
-    expect(bundles.length).toBeGreaterThan(0);
+    // An .mjs bundle means the output format went back to ESM, which is the fault
+    // this test exists for. Say so, rather than reporting "no bundles found".
+    const esmBundles = assetDirs.filter((entry) =>
+      existsSync(join(assembly.directory, entry, 'index.mjs')),
+    );
+    expect(esmBundles, 'bundles are ESM; CommonJS is required - see the stack').toEqual([]);
 
-    for (const bundle of bundles) {
-      const code = readFileSync(bundle, 'utf8');
-      const external = [...code.matchAll(/from"([^"]+)"/g)]
-        .map((match) => match[1]!)
-        // A bare specifier is one the runtime has to supply. Relative paths are in
-        // the bundle, and Node builtins genuinely are provided - with or without the
-        // node: prefix, which bundled dependencies are inconsistent about.
-        .filter((specifier) => !specifier.startsWith('.'))
-        .filter((specifier) => !specifier.startsWith('node:'))
-        .filter((specifier) => !builtinModules.includes(specifier))
-        // Strings that merely look like imports inside the minified code.
-        .filter((specifier) => /^(@[\w.-]+\/)?[\w.-]+$/.test(specifier));
+    const assets = assetDirs
+      .map((entry) => join(assembly.directory, entry, 'index.js'))
+      .filter((file) => existsSync(file));
 
-      expect(external, `${bundle} expects the runtime to provide: ${external.join(', ')}`).toEqual([]);
+    expect(assets.length, 'no Lambda bundles were produced').toBeGreaterThan(0);
+
+    // The handlers read these at module scope; absent, they fail for the wrong reason.
+    process.env.PHOTO_BUCKET ??= 'test-bucket';
+    process.env.TABLE_NAME ??= 'test-table';
+    process.env.PARSE_WORKER_FUNCTION ??= 'test-worker';
+    process.env.AWS_REGION ??= 'eu-west-1';
+
+    for (const [index, asset] of assets.entries()) {
+      const dir = join(staging, String(index));
+      mkdirSync(dir);
+      copyFileSync(asset, join(dir, 'index.js'));
+
+      const loaded = require_(join(dir, 'index.js')) as { handler?: unknown };
+      expect(typeof loaded.handler, `${asset} does not export a handler`).toBe('function');
     }
   });
 });
