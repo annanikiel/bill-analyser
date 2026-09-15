@@ -117,52 +117,45 @@ So: in the **Playground**, work down from newest until one answers. If Opus 5 is
 refused, try **Opus 4.5**; if the newest Sonnet is refused, try the one before it.
 The app works well on either.
 
-### 3c. Get the exact model id
+### 3c. The model id to use
 
-The model catalogue is not the most reliable place to read this, because most models
-are actually reached through an *inference profile* whose id differs from the plain
-model name. The Playground will tell you exactly what it just used:
+**Do not copy the id from the model catalogue or the Playground.** This is the one
+place the console will actively mislead you, and it cost a long detour here.
 
-1. In the Playground, after the model has replied, open the **⋮** menu (top right of
-   the chat panel) → **View API request**.
-2. Read the `--model-id` line. It looks like:
+Bedrock has two model-naming schemes, for two different endpoints:
 
-   ```
-   --model-id arn:aws:bedrock:eu-west-1:123456789012:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0
-   ```
+| Endpoint | Model id looks like | Where you see it |
+|---|---|---|
+| `bedrock-runtime` (InvokeModel / Converse) | `eu.anthropic.claude-opus-4-5-20251101-v1:0`, or an `inference-profile/...` ARN | The Playground, the model catalogue, "View API request" |
+| **The Messages API endpoint** — what this app uses | `anthropic.claude-opus-4-5` | Nowhere in the console |
 
-3. The part you want is everything after `inference-profile/`:
+The console only ever shows you the first kind, because that is what the console
+itself uses. Passing one of those to this app gives:
 
-   ```
-   eu.anthropic.claude-opus-4-5-20251101-v1:0
-   ```
+> `404 ... The model 'arn:aws:bedrock:...:inference-profile/eu.anthropic.claude-opus-4-5-20251101-v1:0' does not exist`
 
-   Copy that verbatim — the `eu.` prefix, the date, and the `-v1:0` suffix are all
-   part of it. Do not shorten it to `anthropic.claude-opus-4-5`; that is a different
-   identifier and will not resolve.
+So use the **second** form: the plain Anthropic model name with an `anthropic.`
+prefix, no region prefix, no date, no `-v1:0`.
 
-4. Note the **region** in that same line. It must match the `AWS_REGION` variable you
-   set in step 2c. If it does not, either change the variable or switch the console
-   to the right region and re-test — they have to agree.
+| Model | Use this |
+|---|---|
+| Claude Opus 4.5 | `anthropic.claude-opus-4-5` |
+| Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5` |
+| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5` |
+| Claude Opus 5, once your account is allowed it | `anthropic.claude-opus-5` |
 
-> **What the `eu.` prefix means for your data.** It is a *cross-region* profile:
-> AWS may route an individual request to any EU region for capacity, so the receipt
-> photo is processed somewhere in the EU rather than only in the region you deployed
-> to. Your stored data — the receipts, the photos, your login — stays in the region
-> you deploy to. If EU-wide processing is not acceptable, you would need a
-> single-region profile, which is not offered for every model.
-
-**If every Anthropic model is refused**, open an AWS support case under *Account and
-Billing* (free on any support plan) asking for Bedrock foundation model access. The
-error message is AWS inviting you to ask.
+The workflow already defaults to `anthropic.claude-opus-4-5`, so in most cases you
+change nothing. Step 3a still matters — it is what tells you *which* model your
+account may use; it just is not where the id comes from.
 
 ## 4. Create the infrastructure
 
 1. Repository → **Actions** tab.
 2. **Deploy AWS infrastructure** in the left sidebar → **Run workflow**.
-3. Check the region matches what you chose. In the **model** box, paste the id you
-   copied in step 3b, replacing the default if it differs — prefix, suffix and all.
-   Leave the retention as it is. → **Run workflow**.
+3. Check the region matches what you chose. Leave the **model** box at its default
+   `anthropic.claude-opus-4-5` unless step 3a showed that model is not available to
+   you, in which case use the matching name from the table in 3c. Leave the retention
+   as it is. → **Run workflow**.
 
 It takes roughly 5–10 minutes, mostly creating the Cognito pool.
 
@@ -245,10 +238,11 @@ refuses to run if it is not on the current `main`, and says so.
 **Scanning fails with a message about reading the receipt.**
 Look at AWS console → **CloudWatch** → **Log groups** → the group with `ParseFn` in
 its name. The most recent entry says plainly what happened. The two usual causes are
-both from step 3: a model id that does not match the catalogue exactly, which shows
-up as a validation error naming the model; and a model your account is not entitled
-to, which shows up as *"is not available for this account"*. Both are fixed by
-redoing step 3 and re-running step 4 with the corrected id.
+both from step 3. A model id in the console's `bedrock-runtime` form — anything with
+a region prefix, a date, a `-v1:0` suffix or an ARN — gives *"The model ... does not
+exist"*; use the `anthropic.`-prefixed name from the table in 3c instead. A model your
+account is not entitled to gives *"is not available for this account"*; pick one that
+answered in the Playground. Both are fixed by re-running step 4 with a corrected id.
 
 **The app shows demo data even though the backend is deployed.**
 The Pages build could not find the stack. Check `AWS_ROLE_ARN` and `AWS_REGION` are
