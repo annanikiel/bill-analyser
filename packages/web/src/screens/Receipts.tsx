@@ -3,6 +3,14 @@ import { formatIsoDateLong, formatMoney } from '@bill/shared';
 import { useAppData } from '../lib/store.js';
 import { hrefFor } from '../lib/router.js';
 import { Banner, EmptyState, Spinner } from '../components/ui.js';
+import type { ReceiptStatus } from '@bill/shared';
+
+const STATUS_LABEL: Record<ReceiptStatus, string> = {
+  parsing: 'Reading…',
+  needs_review: 'Needs review',
+  confirmed: 'Confirmed',
+  failed: 'Could not be read',
+};
 
 export function ReceiptsScreen() {
   const { receipts, loading, error } = useAppData();
@@ -67,7 +75,7 @@ export function ReceiptsScreen() {
                 <span className="receipt-total">{formatMoney(receipt.totalMinor, receipt.currency)}</span>
                 {receipt.status !== 'confirmed' && (
                   <span className={`status-pill status-${receipt.status}`}>
-                    {receipt.status === 'needs_review' ? 'Needs review' : receipt.status}
+                    {STATUS_LABEL[receipt.status]}
                   </span>
                 )}
               </a>

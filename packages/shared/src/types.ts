@@ -75,6 +75,8 @@ export interface Receipt {
   createdAt: string;
   updatedAt: string;
   notes?: string;
+  /** Why reading failed, when status is 'failed'. Shown to the user. */
+  parseError?: string;
 }
 
 /**

@@ -5,15 +5,9 @@ name: Deploy web app to GitHub Pages
 # never have to be copied by hand and cannot drift out of date. With no credentials
 # configured it publishes the demo-data version, which is also what a fork gets.
 
+# Manual only. Merging to main does not publish - deciding when the live app
+# changes is a separate decision from deciding when code lands on main.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.base.json'
-      - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
 permissions:

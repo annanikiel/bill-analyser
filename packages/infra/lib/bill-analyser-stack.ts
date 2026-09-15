@@ -238,9 +238,15 @@ export class BillAnalyserStack extends Stack {
         },
       });
 
-    // Reading a receipt waits on the model, so it gets a long timeout and more
-    // memory; everything else is a DynamoDB round trip and finishes in milliseconds.
-    const parseFn = makeHandler('ParseFn', 'parse.ts', Duration.minutes(5));
+    /*
+     * Reading a receipt is split in two. API Gateway will not hold an integration
+     * open beyond 30 seconds whatever the Lambda's own timeout says, and a model
+     * reading a photographed receipt can comfortably take longer - so the part
+     * behind the API only records the job and returns, and the worker, which nothing
+     * is waiting on, takes as long as it needs.
+     */
+    const parseWorkerFn = makeHandler('ParseWorkerFn', 'parse-worker.ts', Duration.minutes(5));
+    const parseFn = makeHandler('ParseFn', 'parse.ts', Duration.seconds(15));
     const receiptsFn = makeHandler('ReceiptsFn', 'receipts.ts', Duration.seconds(30));
     const categoriesFn = makeHandler('CategoriesFn', 'categories.ts', Duration.seconds(15));
     const rulesFn = makeHandler('RulesFn', 'rules.ts', Duration.seconds(15));
@@ -250,10 +256,15 @@ export class BillAnalyserStack extends Stack {
     table.grantReadWriteData(categoriesFn);
     table.grantReadWriteData(rulesFn);
     table.grantReadWriteData(parseFn);
+    table.grantReadWriteData(parseWorkerFn);
 
     photos.grantPut(uploadsFn);
     photos.grantRead(uploadsFn);
-    photos.grantRead(parseFn);
+    photos.grantRead(parseWorkerFn);
+
+    // The only thing the API-facing half may do beyond writing the receipt row.
+    parseWorkerFn.grantInvoke(parseFn);
+    parseFn.addEnvironment('PARSE_WORKER_FUNCTION', parseWorkerFn.functionName);
 
     /*
      * Bedrock serves newer Claude models through regional inference profiles
@@ -264,7 +275,7 @@ export class BillAnalyserStack extends Stack {
      * is used - so both forms are granted, still scoped to Anthropic models rather
      * than opened up to "*".
      */
-    parseFn.addToRolePolicy(
+    parseWorkerFn.addToRolePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         actions: ['bedrock:InvokeModel'],
