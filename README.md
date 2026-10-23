@@ -109,6 +109,12 @@ npm run typecheck  # whole workspace
 npm run build      # production build into packages/web/dist
 ```
 
+## Shutting it down
+
+[docs/decommissioning.md](docs/decommissioning.md) — including the cheap option of
+mothballing rather than deleting, and the four resources that deliberately survive
+stack deletion and so need removing by hand.
+
 ## Deploying
 
 See [docs/setup.md](docs/setup.md). In short:
